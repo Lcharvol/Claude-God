@@ -1,0 +1,27 @@
+name: ClaudeGod
+options:
+  bundleIdPrefix: com.lcharvol
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+
+targets:
+  ClaudeGod:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lcharvol.claude-god
+        PRODUCT_NAME: Claude God
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "13.0"
+        INFOPLIST_KEY_LSUIElement: true
+        INFOPLIST_KEY_CFBundleDisplayName: "Claude God"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ENABLE_HARDENED_RUNTIME: true

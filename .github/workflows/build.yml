@@ -1,0 +1,54 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build app
+        run: |
+          xcodebuild \
+            -project ClaudeGod.xcodeproj \
+            -scheme ClaudeGod \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Create DMG
+        run: |
+          APP_PATH="build/Build/Products/Release/Claude God.app"
+          DMG_NAME="ClaudeGod-${{ github.ref_name }}.dmg"
+
+          # Create a temporary directory for the DMG contents
+          mkdir -p dmg-contents
+          cp -R "$APP_PATH" dmg-contents/
+          ln -s /Applications dmg-contents/Applications
+
+          # Create DMG
+          hdiutil create \
+            -volname "Claude God" \
+            -srcfolder dmg-contents \
+            -ov \
+            -format UDZO \
+            "$DMG_NAME"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ClaudeGod-*.dmg
+          generate_release_notes: true
+          draft: false

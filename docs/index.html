@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude God — Monitor your Claude API usage from the menu bar</title>
+    <style>
+        :root {
+            --bg: #0a0a0b;
+            --surface: #141417;
+            --border: #2a2a2e;
+            --text: #e4e4e7;
+            --muted: #8b8b94;
+            --accent: #a78bfa;
+            --accent-hover: #c4b5fd;
+            --green: #4ade80;
+            --orange: #fb923c;
+            --red: #f87171;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Hero */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+            position: relative;
+        }
+
+        .hero::before {
+            content: "";
+            position: absolute;
+            top: -40%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(167,139,250,0.15) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 1rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            font-size: 0.85rem;
+            color: var(--muted);
+            margin-bottom: 2rem;
+        }
+
+        .badge span {
+            color: var(--accent);
+        }
+
+        h1 {
+            font-size: clamp(2.5rem, 6vw, 4.5rem);
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+        }
+
+        h1 .highlight {
+            background: linear-gradient(135deg, var(--accent), #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 1.25rem;
+            color: var(--muted);
+            max-width: 500px;
+            margin-bottom: 2.5rem;
+        }
+
+        .cta-group {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.85rem 2rem;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #0a0a0b;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 8px 30px rgba(167,139,250,0.3);
+        }
+
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--accent);
+            transform: translateY(-1px);
+        }
+
+        .btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* App preview */
+        .preview {
+            margin-top: 4rem;
+            position: relative;
+        }
+
+        .preview-window {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.5rem;
+            width: 320px;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+        }
+
+        .preview-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .preview-header .icon {
+            width: 28px;
+            height: 28px;
+            background: var(--accent);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.85rem;
+            color: #0a0a0b;
+        }
+
+        .preview-header h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .usage-item {
+            margin-bottom: 1rem;
+        }
+
+        .usage-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .usage-label .pct { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+        .bar-bg {
+            height: 8px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 1.5s ease;
+        }
+
+        .bar-fill.green { background: var(--green); }
+        .bar-fill.orange { background: var(--orange); }
+
+        .usage-detail {
+            font-size: 0.7rem;
+            color: var(--muted);
+            margin-top: 0.2rem;
+        }
+
+        .reset-row {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.8rem;
+            color: var(--muted);
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+            margin-top: 0.5rem;
+        }
+
+        .reset-row .time {
+            margin-left: auto;
+            font-weight: 600;
+            color: var(--text);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Features */
+        .features {
+            padding: 6rem 2rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .features h2 {
+            text-align: center;
+            font-size: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+
+        .feature-card .emoji {
+            font-size: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .feature-card p {
+            font-size: 0.9rem;
+            color: var(--muted);
+        }
+
+        /* Setup */
+        .setup {
+            padding: 4rem 2rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .setup h2 {
+            text-align: center;
+            font-size: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .step {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .step-number {
+            width: 36px;
+            height: 36px;
+            min-width: 36px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--accent);
+        }
+
+        .step-content h3 {
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .step-content p {
+            font-size: 0.9rem;
+            color: var(--muted);
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--muted);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Countdown animation */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .countdown { animation: pulse 2s ease-in-out infinite; }
+    </style>
+</head>
+<body>
+
+<!-- Hero -->
+<section class="hero">
+    <div class="badge">
+        <span>●</span> macOS 13+
+    </div>
+
+    <h1>
+        Know your Claude limits.<br>
+        <span class="highlight">Always.</span>
+    </h1>
+
+    <p class="subtitle">
+        A tiny menu bar app that shows your Anthropic API rate limits at a glance. Open source, zero dependencies, built with SwiftUI.
+    </p>
+
+    <div class="cta-group">
+        <a href="https://github.com/Lcharvol/Claude-God/releases/latest" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download for Mac
+        </a>
+        <a href="https://github.com/Lcharvol/Claude-God" class="btn btn-secondary">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+            View on GitHub
+        </a>
+    </div>
+
+    <!-- App preview -->
+    <div class="preview">
+        <div class="preview-window">
+            <div class="preview-header">
+                <div class="icon">C</div>
+                <h3>Claude God</h3>
+            </div>
+
+            <div class="usage-item">
+                <div class="usage-label">
+                    <span>Tokens</span>
+                    <span class="pct" style="color: var(--green)">78%</span>
+                </div>
+                <div class="bar-bg">
+                    <div class="bar-fill green" style="width: 78%"></div>
+                </div>
+                <div class="usage-detail">62 400 / 80 000</div>
+            </div>
+
+            <div class="usage-item">
+                <div class="usage-label">
+                    <span>Requests</span>
+                    <span class="pct" style="color: var(--orange)">40%</span>
+                </div>
+                <div class="bar-bg">
+                    <div class="bar-fill orange" style="width: 40%"></div>
+                </div>
+                <div class="usage-detail">20 / 50</div>
+            </div>
+
+            <div class="reset-row">
+                <span>Reset in:</span>
+                <span class="time countdown" id="countdown">2m 34s</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Features -->
+<section class="features">
+    <h2>Simple by design</h2>
+    <div class="feature-grid">
+        <div class="feature-card">
+            <div class="emoji">&#9881;&#65039;</div>
+            <h3>Lives in the menu bar</h3>
+            <p>No window, no dock icon. Just a discreet percentage in your menu bar that's always visible.</p>
+        </div>
+        <div class="feature-card">
+            <div class="emoji">&#9889;</div>
+            <h3>Near-zero cost</h3>
+            <p>Each refresh uses a single Haiku token (~$0.00001). Check your limits without burning your budget.</p>
+        </div>
+        <div class="feature-card">
+            <div class="emoji">&#128230;</div>
+            <h3>Zero dependencies</h3>
+            <p>Pure Swift + SwiftUI. No Electron, no Node, no frameworks. Under 400 lines of code.</p>
+        </div>
+        <div class="feature-card">
+            <div class="emoji">&#128272;</div>
+            <h3>Your key stays local</h3>
+            <p>API key is stored locally on your Mac. No server, no telemetry, no data collection.</p>
+        </div>
+        <div class="feature-card">
+            <div class="emoji">&#127912;</div>
+            <h3>Color-coded bars</h3>
+            <p>Green, orange, red — see your remaining capacity at a glance without reading numbers.</p>
+        </div>
+        <div class="feature-card">
+            <div class="emoji">&#128336;</div>
+            <h3>Reset countdown</h3>
+            <p>Live countdown shows exactly when your rate limits reset. No more guessing.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Setup -->
+<section class="setup">
+    <h2>Up and running in 30 seconds</h2>
+
+    <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+            <h3>Download</h3>
+            <p>Grab the latest <code>.dmg</code> from the releases page. No Xcode needed.</p>
+        </div>
+    </div>
+
+    <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+            <h3>Drag to Applications</h3>
+            <p>Open the <code>.dmg</code>, drag Claude God to your Applications folder.</p>
+        </div>
+    </div>
+
+    <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+            <h3>Enter your API key</h3>
+            <p>Click the menu bar icon, paste your <a href="https://console.anthropic.com/" style="color: var(--accent)">Anthropic API key</a>, and you're done.</p>
+        </div>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer>
+    <p>
+        Built with SwiftUI.
+        Open source on <a href="https://github.com/Lcharvol/Claude-God">GitHub</a>.
+        Made by <a href="https://github.com/Lcharvol">Lcharvol</a>.
+    </p>
+</footer>
+
+<!-- Countdown animation script -->
+<script>
+    let seconds = 154;
+    const el = document.getElementById("countdown");
+    setInterval(() => {
+        seconds = seconds <= 0 ? 300 : seconds - 1;
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        el.textContent = m + "m " + String(s).padStart(2, "0") + "s";
+    }, 1000);
+</script>
+
+</body>
+</html>

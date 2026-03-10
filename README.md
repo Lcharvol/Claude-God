@@ -20,6 +20,17 @@ Claude God sits in your macOS menu bar and shows how much API capacity you have 
 - One-click refresh
 - API key management
 
+## Download
+
+**[Download the latest .dmg](https://github.com/Lcharvol/Claude-God/releases/latest)** — no Xcode required.
+
+1. Open the `.dmg`
+2. Drag **Claude God** to your Applications folder
+3. Launch it — click the `C` icon in the menu bar
+4. Paste your [Anthropic API key](https://console.anthropic.com/) and hit Save
+
+That's it.
+
 ## How it works
 
 The app sends a minimal API request (1 token via Haiku, cost ~$0.00001) and reads the rate limit headers that Anthropic returns with every response:
@@ -32,69 +43,63 @@ The app sends a minimal API request (1 token via Haiku, cost ~$0.00001) and read
 | `anthropic-ratelimit-requests-limit` | Max requests per window |
 | `anthropic-ratelimit-requests-remaining` | Requests left |
 
-## Requirements
+## Build from source
 
-- macOS 13 (Ventura) or later
-- Xcode 15+
-- An [Anthropic API key](https://console.anthropic.com/)
-
-## Setup
-
-### 1. Clone
+Requires macOS 13+ and Xcode 15+.
 
 ```bash
+# Clone
 git clone https://github.com/Lcharvol/Claude-God.git
 cd Claude-God
+
+# Install xcodegen (one time)
+brew install xcodegen
+
+# Generate Xcode project and build
+xcodegen generate
+xcodebuild -project ClaudeGod.xcodeproj -scheme ClaudeGod -configuration Release build
 ```
 
-### 2. Create the Xcode project
-
-1. Open Xcode → **File** → **New** → **Project**
-2. Select **macOS** → **App** → Next
-3. Set:
-   - Product Name: `ClaudeUsage`
-   - Interface: **SwiftUI**
-   - Language: **Swift**
-4. Save anywhere, then **delete** the generated `ContentView.swift` and `ClaudeUsageApp.swift`
-5. Drag the 3 `.swift` files from the repo root into the Xcode project navigator
-   - Check **"Copy items if needed"**
-   - Check **"Add to target: ClaudeUsage"**
-
-### 3. Configure as menu bar app
-
-This hides the app from the Dock so it only appears in the menu bar:
-
-1. Click the **project** (blue icon) in Xcode's sidebar
-2. Go to the **Info** tab
-3. Under **Custom macOS Application Target Properties**, add:
-   - Key: `Application is agent (UIElement)`
-   - Value: `YES`
-
-### 4. Build & Run
-
-Press `Cmd + R`. The app appears in your menu bar as a `C` icon.
-
-### 5. Enter your API key
-
-Click the icon → paste your Anthropic API key → **Save**. Done.
+Or open `ClaudeGod.xcodeproj` in Xcode and press `Cmd + R`.
 
 ## Project structure
 
 ```
 Claude-God/
-├── ClaudeUsageApp.swift   # App entry point, MenuBarExtra setup
-├── UsageManager.swift     # API calls, data management, state
-├── MenuBarView.swift      # UI: popover with usage bars and controls
+├── Sources/
+│   ├── ClaudeUsageApp.swift       # App entry point, MenuBarExtra setup
+│   ├── UsageManager.swift         # API calls, data management, state
+│   └── MenuBarView.swift          # UI: popover with usage bars and controls
+├── docs/
+│   └── index.html                 # Landing page (GitHub Pages)
+├── .github/
+│   └── workflows/
+│       └── build.yml              # CI: auto-build + release on tag push
+├── project.yml                    # Xcodegen spec (generates .xcodeproj)
 └── README.md
 ```
 
-| File | Lines | Role |
-|---|---|---|
-| `ClaudeUsageApp.swift` | ~25 | Bootstraps the app and creates the menu bar icon |
-| `UsageManager.swift` | ~160 | ObservableObject handling API calls and rate limit parsing |
-| `MenuBarView.swift` | ~210 | SwiftUI views: settings, usage bars, countdown, buttons |
-
 **Zero external dependencies.** Only Foundation, SwiftUI, and Combine.
+
+## Releasing a new version
+
+Push a git tag and GitHub Actions builds the `.dmg` automatically:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+A new GitHub Release with the `.dmg` attached will be created within minutes.
+
+## Landing page
+
+The `docs/` folder contains a static landing page. To enable it:
+
+1. Go to your repo **Settings** → **Pages**
+2. Set source to **Deploy from a branch**
+3. Branch: `main`, folder: `/docs`
+4. Your site will be live at `https://lcharvol.github.io/Claude-God/`
 
 ## Roadmap
 
@@ -103,7 +108,6 @@ Claude-God/
 - [ ] Store API key in Keychain instead of UserDefaults
 - [ ] Launch at login support
 - [ ] Track multiple models (different rate limits per model)
-- [ ] Xcode project file in the repo for one-click build
 
 ## License
 

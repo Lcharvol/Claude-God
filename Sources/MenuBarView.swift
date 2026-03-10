@@ -16,6 +16,11 @@ struct MenuBarView: View {
                 .padding(.top, 14)
                 .padding(.bottom, 10)
 
+            // Update banner
+            if manager.updateAvailable {
+                updateBanner
+            }
+
             Divider()
 
             // Content
@@ -84,6 +89,33 @@ struct MenuBarView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    // MARK: - Update banner
+
+    private var updateBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.down.circle.fill")
+                .foregroundColor(.purple)
+                .font(.system(size: 14))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("v\(manager.latestVersion) available")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("v\(UsageManager.currentVersion) installed")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Button("Update") {
+                manager.installUpdate()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.purple)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.purple.opacity(0.08))
     }
 
     // MARK: - Settings

@@ -1,5 +1,5 @@
 // UsageManager.swift
-// Gère la logique : appels API, stockage des données, calculs, notifications
+// Gère la logique : appels OAuth API, stockage des données, calculs, notifications
 
 import Foundation
 import Combine
@@ -29,20 +29,12 @@ enum RefreshInterval: Int, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Source de la clé API
-
-enum APIKeySource: String {
-    case manual = "Manual"
-    case keychain = "Keychain"
-    case file = "~/.anthropic/api_key"
-    case environment = "ANTHROPIC_API_KEY"
-}
-
 // MARK: - Seuils de couleur partagés
 
 enum UsageLevel {
     case good, warning, critical
 
+    /// percent = pourcentage RESTANT (100 - utilization)
     init(percent: Double) {
         if percent > 50 { self = .good }
         else if percent > 20 { self = .warning }
@@ -58,7 +50,29 @@ enum UsageLevel {
     }
 }
 
-// MARK: - Formatters statiques (évite les allocations répétées)
+// MARK: - Quota model
+
+struct UsageQuota: Identifiable {
+    let id = UUID()
+    let label: String
+    let icon: String
+    let utilization: Double      // 0-100, pourcentage UTILISÉ
+    let resetsAt: Date?
+
+    var percentRemaining: Double { max(0, 100 - utilization) }
+    var level: UsageLevel { UsageLevel(percent: percentRemaining) }
+}
+
+// MARK: - Credential source
+
+enum CredentialSource: String {
+    case file = "credentials.json"
+    case keychain = "Keychain"
+    case environment = "CLAUDE_CODE_OAUTH_TOKEN"
+    case none = "Not found"
+}
+
+// MARK: - Formatters statiques
 
 enum Formatters {
     static let resetDate: ISO8601DateFormatter = {
@@ -67,21 +81,14 @@ enum Formatters {
         return f
     }()
 
-    static let number: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.groupingSeparator = ","
+    static let resetDateNoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
         return f
     }()
 
-    static func formatNumber(_ n: Int) -> String {
-        number.string(from: NSNumber(value: n)) ?? "\(n)"
-    }
-
-    static func formatCompact(_ n: Int) -> String {
-        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
-        return "\(n)"
+    static func parseISO(_ string: String) -> Date? {
+        resetDate.date(from: string) ?? resetDateNoFrac.date(from: string)
     }
 }
 
@@ -89,22 +96,19 @@ enum Formatters {
 
 class UsageManager: ObservableObject {
 
-    // MARK: - Données d'utilisation
+    // MARK: - Données d'utilisation (nouveau modèle OAuth)
 
-    @Published var tokensRemaining = 0
-    @Published var tokensLimit = 0
-    @Published var requestsRemaining = 0
-    @Published var requestsLimit = 0
-    @Published var resetTime: Date?
+    @Published var quotas: [UsageQuota] = []
+    @Published var subscriptionType: String = ""
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var lastRefresh: Date?
     @Published var timeUntilReset: String = "—"
+    @Published var isAuthenticated = false
 
     // MARK: - État de l'interface
 
-    @Published var apiKey = ""
-    @Published var apiKeySource: APIKeySource = .manual
+    @Published var credentialSource: CredentialSource = .none
     @Published var showSettings = false
 
     // MARK: - Mise à jour
@@ -148,54 +152,56 @@ class UsageManager: ObservableObject {
 
     // MARK: - Propriétés calculées
 
-    var tokensPercent: Double {
-        guard tokensLimit > 0 else { return 0 }
-        return Double(tokensRemaining) / Double(tokensLimit) * 100
+    /// Le quota le plus "urgent" (le plus utilisé) pour afficher dans la menu bar
+    var primaryQuota: UsageQuota? {
+        quotas.min(by: { $0.percentRemaining < $1.percentRemaining })
     }
-
-    var requestsPercent: Double {
-        guard requestsLimit > 0 else { return 0 }
-        return Double(requestsRemaining) / Double(requestsLimit) * 100
-    }
-
-    var tokensLevel: UsageLevel { UsageLevel(percent: tokensPercent) }
-    var requestsLevel: UsageLevel { UsageLevel(percent: requestsPercent) }
 
     var menuBarTitle: String {
-        guard tokensLimit > 0 else { return "—" }
-        return "\(Int(tokensPercent))%"
+        guard let q = primaryQuota else { return "—" }
+        return "\(Int(q.percentRemaining))%"
     }
+
+    /// Le prochain reset parmi tous les quotas
+    var nextResetDate: Date? {
+        quotas.compactMap(\.resetsAt)
+            .filter { $0.timeIntervalSinceNow > 0 }
+            .min()
+    }
+
+    // MARK: - OAuth credentials
+
+    private var accessToken: String?
+    private var refreshToken: String?
+    private var tokenExpiresAt: Double?
+
+    private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    private static let refreshURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
+    private static let clientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+    private static let scopes = "user:profile user:inference user:sessions:claude_code"
 
     // MARK: - Timers
 
     private var countdownTimer: AnyCancellable?
     private var autoRefreshTimer: AnyCancellable?
     private var hasNotifiedLowUsage = false
-
-    /// Cooldown minimum entre deux refresh automatiques (secondes)
     private let autoRefreshCooldown: TimeInterval = 30
 
     // MARK: - Initialisation
 
     init() {
-        // Charger les préférences
         let savedInterval = UserDefaults.standard.integer(forKey: "refreshInterval")
         self.refreshInterval = RefreshInterval(rawValue: savedInterval) ?? .fiveMin
         self.notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
         self.notificationThreshold = UserDefaults.standard.object(forKey: "notificationThreshold") as? Double ?? 20.0
         self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
 
-        // Charger la clé API (Keychain > fichier > env var)
-        self.apiKey = KeychainHelper.load(key: "apiKey") ?? ""
-        migrateAPIKeyFromUserDefaults()
-        autoDetectAPIKey()
+        loadCredentials()
 
-        // Timer de compte à rebours (1 seconde)
         countdownTimer = Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 self?.updateCountdown()
-                self?.checkResetExpired()
             }
 
         setupAutoRefresh()
@@ -204,59 +210,197 @@ class UsageManager: ObservableObject {
             requestNotificationPermission()
         }
 
-        if !apiKey.isEmpty {
+        if isAuthenticated {
             refresh()
         }
 
         checkForUpdates()
     }
 
+    // MARK: - Credential loading
+
+    func loadCredentials() {
+        // 1. Fichier ~/.claude/.credentials.json
+        let filePath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/.credentials.json")
+
+        if let data = try? Data(contentsOf: filePath),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let oauth = json["claudeAiOauth"] as? [String: Any],
+           let token = oauth["accessToken"] as? String, !token.isEmpty {
+            accessToken = token
+            refreshToken = oauth["refreshToken"] as? String
+            tokenExpiresAt = oauth["expiresAt"] as? Double
+            subscriptionType = oauth["subscriptionType"] as? String ?? ""
+            credentialSource = .file
+            isAuthenticated = true
+            print("[ClaudeGod] Credentials loaded from file (type: \(subscriptionType))")
+            return
+        }
+
+        // 2. Keychain (service "Claude Code-credentials")
+        if let keychainJSON = loadFromKeychain(),
+           let oauth = keychainJSON["claudeAiOauth"] as? [String: Any],
+           let token = oauth["accessToken"] as? String, !token.isEmpty {
+            accessToken = token
+            refreshToken = oauth["refreshToken"] as? String
+            tokenExpiresAt = oauth["expiresAt"] as? Double
+            subscriptionType = oauth["subscriptionType"] as? String ?? ""
+            credentialSource = .keychain
+            isAuthenticated = true
+            print("[ClaudeGod] Credentials loaded from Keychain (type: \(subscriptionType))")
+            return
+        }
+
+        // 3. Variable d'environnement
+        if let envToken = ProcessInfo.processInfo.environment["CLAUDE_CODE_OAUTH_TOKEN"],
+           !envToken.isEmpty {
+            accessToken = envToken
+            credentialSource = .environment
+            isAuthenticated = true
+            print("[ClaudeGod] Credentials loaded from environment")
+            return
+        }
+
+        credentialSource = .none
+        isAuthenticated = false
+        print("[ClaudeGod] No credentials found")
+    }
+
+    private func loadFromKeychain() -> [String: Any]? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard let jsonString = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !jsonString.isEmpty,
+                  let jsonData = jsonString.data(using: .utf8),
+                  let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+            else { return nil }
+
+            return json
+        } catch {
+            return nil
+        }
+    }
+
+    // MARK: - Token refresh
+
+    private var tokenNeedsRefresh: Bool {
+        guard let expiresAt = tokenExpiresAt else { return true }
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        let bufferMs: Double = 5 * 60 * 1000
+        return nowMs + bufferMs >= expiresAt
+    }
+
+    private func refreshAccessToken(completion: @escaping (Bool) -> Void) {
+        guard let rt = refreshToken else {
+            completion(false)
+            return
+        }
+
+        var request = URLRequest(url: Self.refreshURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 15
+
+        let body: [String: String] = [
+            "grant_type": "refresh_token",
+            "refresh_token": rt,
+            "client_id": Self.clientID,
+            "scope": Self.scopes
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        print("[ClaudeGod] Refreshing OAuth token...")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self, let data = data, error == nil,
+                  let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode >= 200, httpResponse.statusCode < 300,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let newToken = json["access_token"] as? String, !newToken.isEmpty
+            else {
+                print("[ClaudeGod] Token refresh failed")
+                DispatchQueue.main.async {
+                    self?.isAuthenticated = false
+                    self?.errorMessage = "Session expired — run `claude login` in Terminal"
+                }
+                completion(false)
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.accessToken = newToken
+                if let newRefresh = json["refresh_token"] as? String {
+                    self.refreshToken = newRefresh
+                }
+                if let expiresIn = json["expires_in"] as? Int {
+                    self.tokenExpiresAt = Date().timeIntervalSince1970 * 1000 + Double(expiresIn) * 1000
+                }
+                print("[ClaudeGod] Token refreshed successfully")
+                completion(true)
+            }
+        }.resume()
+    }
+
     // MARK: - Actions
-
-    func saveAPIKey() {
-        KeychainHelper.save(key: "apiKey", value: apiKey)
-        apiKeySource = .keychain
-    }
-
-    func clearAPIKey() {
-        apiKey = ""
-        KeychainHelper.delete(key: "apiKey")
-        tokensRemaining = 0
-        tokensLimit = 0
-        requestsRemaining = 0
-        requestsLimit = 0
-        resetTime = nil
-        lastRefresh = nil
-        errorMessage = nil
-        hasNotifiedLowUsage = false
-        timeUntilReset = "—"
-    }
 
     func refresh() {
         guard !isLoading else { return }
-        guard !apiKey.isEmpty else {
-            errorMessage = "API key missing"
+        guard isAuthenticated, let token = accessToken else {
+            errorMessage = "Not authenticated — run `claude login` in Terminal"
+            return
+        }
+
+        // Refresh token si nécessaire
+        if tokenNeedsRefresh && refreshToken != nil {
+            isLoading = true
+            errorMessage = nil
+            refreshAccessToken { [weak self] success in
+                guard let self else { return }
+                if success {
+                    self.fetchUsage()
+                } else {
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                    }
+                }
+            }
             return
         }
 
         isLoading = true
         errorMessage = nil
+        fetchUsage()
+    }
 
-        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        request.setValue("application/json", forHTTPHeaderField: "content-type")
+    private func fetchUsage() {
+        guard let token = accessToken else { return }
 
-        let body: [String: Any] = [
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 1,
-            "messages": [["role": "user", "content": "h"]]
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        var request = URLRequest(url: Self.usageURL)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token.trimmingCharacters(in: .whitespacesAndNewlines))", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("ClaudeGod", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 15
 
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        print("[ClaudeGod] Fetching usage from OAuth API...")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.isLoading = false
@@ -269,48 +413,119 @@ class UsageManager: ObservableObject {
 
                 guard let httpResponse = response as? HTTPURLResponse else {
                     self.errorMessage = "Invalid response"
-                    print("[ClaudeGod] No HTTP response")
                     return
                 }
 
                 print("[ClaudeGod] HTTP \(httpResponse.statusCode)")
 
                 switch httpResponse.statusCode {
-                case 200...299:
-                    self.parseRateLimitHeaders(httpResponse)
+                case 200:
+                    guard let data = data else {
+                        self.errorMessage = "Empty response"
+                        return
+                    }
+                    if let raw = String(data: data, encoding: .utf8) {
+                        print("[ClaudeGod] Response: \(raw.prefix(500))")
+                    }
+                    self.parseUsageResponse(data)
                     self.lastRefresh = Date()
                     self.checkLowUsageNotification()
-                case 401:
-                    self.errorMessage = "Invalid API key"
-                case 403:
-                    self.errorMessage = "Access denied"
-                case 429:
-                    self.errorMessage = "Rate limited — try again later"
-                    self.parseRateLimitHeaders(httpResponse)
-                    self.lastRefresh = Date()
-                default:
-                    // Lire le body pour avoir le message d'erreur de l'API
-                    if let data = data,
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let apiError = json["error"] as? [String: Any],
-                       let message = apiError["message"] as? String {
-                        self.errorMessage = message
-                        print("[ClaudeGod] API error: \(message)")
+
+                case 401, 403:
+                    // Token expiré ou invalide, essayer de refresh
+                    if self.refreshToken != nil {
+                        print("[ClaudeGod] Got \(httpResponse.statusCode), attempting token refresh...")
+                        self.isLoading = true
+                        self.refreshAccessToken { success in
+                            if success {
+                                self.fetchUsage()
+                            } else {
+                                DispatchQueue.main.async {
+                                    self.isLoading = false
+                                    self.isAuthenticated = false
+                                    self.errorMessage = "Session expired — run `claude login`"
+                                }
+                            }
+                        }
                     } else {
-                        self.errorMessage = "Error \(httpResponse.statusCode)"
-                        print("[ClaudeGod] Unknown error \(httpResponse.statusCode)")
+                        self.isAuthenticated = false
+                        self.errorMessage = "Session expired — run `claude login`"
                     }
+
+                default:
+                    self.errorMessage = "Error \(httpResponse.statusCode)"
+                    print("[ClaudeGod] Error \(httpResponse.statusCode)")
                 }
             }
+        }.resume()
+    }
+
+    // MARK: - Response parsing
+
+    private func parseUsageResponse(_ data: Data) {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            errorMessage = "Failed to parse response"
+            return
         }
-        task.resume()
+
+        var newQuotas: [UsageQuota] = []
+
+        // Session (5 heures)
+        if let fiveHour = json["five_hour"] as? [String: Any],
+           let utilization = fiveHour["utilization"] as? Double {
+            let resetsAt = (fiveHour["resets_at"] as? String).flatMap(Formatters.parseISO)
+            newQuotas.append(UsageQuota(
+                label: "Session (5h)",
+                icon: "bolt.fill",
+                utilization: utilization,
+                resetsAt: resetsAt
+            ))
+        }
+
+        // Hebdomadaire (7 jours)
+        if let sevenDay = json["seven_day"] as? [String: Any],
+           let utilization = sevenDay["utilization"] as? Double {
+            let resetsAt = (sevenDay["resets_at"] as? String).flatMap(Formatters.parseISO)
+            newQuotas.append(UsageQuota(
+                label: "Weekly (all models)",
+                icon: "calendar",
+                utilization: utilization,
+                resetsAt: resetsAt
+            ))
+        }
+
+        // Sonnet spécifique
+        if let sonnet = json["seven_day_sonnet"] as? [String: Any],
+           let utilization = sonnet["utilization"] as? Double {
+            let resetsAt = (sonnet["resets_at"] as? String).flatMap(Formatters.parseISO)
+            newQuotas.append(UsageQuota(
+                label: "Sonnet (7d)",
+                icon: "sparkle",
+                utilization: utilization,
+                resetsAt: resetsAt
+            ))
+        }
+
+        // Opus spécifique
+        if let opus = json["seven_day_opus"] as? [String: Any],
+           let utilization = opus["utilization"] as? Double {
+            let resetsAt = (opus["resets_at"] as? String).flatMap(Formatters.parseISO)
+            newQuotas.append(UsageQuota(
+                label: "Opus (7d)",
+                icon: "star.fill",
+                utilization: utilization,
+                resetsAt: resetsAt
+            ))
+        }
+
+        quotas = newQuotas
+        print("[ClaudeGod] Parsed \(newQuotas.count) quotas")
     }
 
     // MARK: - Countdown
 
-    /// Met à jour le texte du compte à rebours (appelé chaque seconde)
     private func updateCountdown() {
-        guard let reset = resetTime else {
+        guard let reset = nextResetDate else {
             if timeUntilReset != "—" { timeUntilReset = "—" }
             return
         }
@@ -347,19 +562,6 @@ class UsageManager: ObservableObject {
         }
     }
 
-    /// Vérifie si le reset est passé et rafraîchit automatiquement (avec cooldown)
-    private func checkResetExpired() {
-        guard let reset = resetTime, lastRefresh != nil else { return }
-        guard reset.timeIntervalSinceNow <= 0 else { return }
-
-        // Cooldown : évite une boucle si le serveur renvoie un resetTime dans le passé
-        if let last = lastRefresh, Date().timeIntervalSince(last) < autoRefreshCooldown { return }
-
-        resetTime = nil
-        hasNotifiedLowUsage = false
-        refresh()
-    }
-
     // MARK: - Notifications
 
     private func requestNotificationPermission() {
@@ -367,8 +569,8 @@ class UsageManager: ObservableObject {
     }
 
     private func checkLowUsageNotification() {
-        guard notificationsEnabled, tokensLimit > 0 else { return }
-        guard tokensPercent <= notificationThreshold else {
+        guard notificationsEnabled, let primary = primaryQuota else { return }
+        guard primary.percentRemaining <= notificationThreshold else {
             hasNotifiedLowUsage = false
             return
         }
@@ -378,7 +580,7 @@ class UsageManager: ObservableObject {
 
         let content = UNMutableNotificationContent()
         content.title = "Claude God"
-        content.body = "Tokens remaining: \(Int(tokensPercent))% (\(Formatters.formatCompact(tokensRemaining)) left)"
+        content.body = "\(primary.label): \(Int(primary.percentRemaining))% remaining"
         content.sound = .default
 
         let request = UNNotificationRequest(
@@ -399,66 +601,7 @@ class UsageManager: ObservableObject {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            // Silently ignore — user may not have granted permission
-        }
-    }
-
-    // MARK: - Parsing
-
-    private func parseRateLimitHeaders(_ response: HTTPURLResponse) {
-        if let value = response.value(forHTTPHeaderField: "anthropic-ratelimit-tokens-limit") {
-            tokensLimit = Int(value) ?? 0
-        }
-        if let value = response.value(forHTTPHeaderField: "anthropic-ratelimit-tokens-remaining") {
-            tokensRemaining = Int(value) ?? 0
-        }
-        if let value = response.value(forHTTPHeaderField: "anthropic-ratelimit-requests-limit") {
-            requestsLimit = Int(value) ?? 0
-        }
-        if let value = response.value(forHTTPHeaderField: "anthropic-ratelimit-requests-remaining") {
-            requestsRemaining = Int(value) ?? 0
-        }
-        if let value = response.value(forHTTPHeaderField: "anthropic-ratelimit-tokens-reset") {
-            resetTime = Formatters.resetDate.date(from: value)
-        }
-    }
-
-    // MARK: - Migration & Auto-détection
-
-    private func migrateAPIKeyFromUserDefaults() {
-        if apiKey.isEmpty, let oldKey = UserDefaults.standard.string(forKey: "anthropicAPIKey"), !oldKey.isEmpty {
-            apiKey = oldKey
-            apiKeySource = .keychain
-            KeychainHelper.save(key: "apiKey", value: oldKey)
-            UserDefaults.standard.removeObject(forKey: "anthropicAPIKey")
-        }
-    }
-
-    private func autoDetectAPIKey() {
-        guard apiKey.isEmpty else {
-            apiKeySource = .keychain
-            return
-        }
-
-        // 1. Fichier ~/.anthropic/api_key (CLI Anthropic)
-        let filePath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".anthropic/api_key")
-        if let fileKey = try? String(contentsOf: filePath, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !fileKey.isEmpty {
-            apiKey = fileKey
-            apiKeySource = .file
-            KeychainHelper.save(key: "apiKey", value: fileKey)
-            return
-        }
-
-        // 2. Variable d'environnement ANTHROPIC_API_KEY
-        if let envKey = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"],
-           !envKey.isEmpty {
-            apiKey = envKey
-            apiKeySource = .environment
-            KeychainHelper.save(key: "apiKey", value: envKey)
-            return
+            // Silently ignore
         }
     }
 
@@ -492,7 +635,6 @@ class UsageManager: ObservableObject {
         }.resume()
     }
 
-    /// Compare deux versions semver (ex: "1.2.0" > "1.1.0")
     static func isNewer(remote: String, current: String) -> Bool {
         let r = remote.split(separator: ".").compactMap { Int($0) }
         let c = current.split(separator: ".").compactMap { Int($0) }

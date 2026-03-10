@@ -23,13 +23,13 @@ struct MenuBarView: View {
                 .opacity(0.5)
 
             Group {
-                if manager.apiKey.isEmpty || manager.showSettings {
+                if !manager.isAuthenticated || manager.showSettings {
                     settingsView
                 } else if manager.isLoading && manager.lastRefresh == nil {
                     loadingView
                 } else if let error = manager.errorMessage {
                     errorView(error)
-                } else if manager.tokensLimit > 0 {
+                } else if !manager.quotas.isEmpty {
                     usageView
                 } else {
                     emptyView
@@ -71,8 +71,15 @@ struct MenuBarView: View {
                     .foregroundColor(.white)
             }
 
-            Text("Claude God")
-                .font(.system(size: 14, weight: .bold))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Claude God")
+                    .font(.system(size: 14, weight: .bold))
+                if !manager.subscriptionType.isEmpty {
+                    Text(manager.subscriptionType.capitalized)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.purple)
+                }
+            }
 
             Spacer()
 
@@ -144,48 +151,63 @@ struct MenuBarView: View {
 
     private var settingsView: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SettingsSection(title: "API Key", icon: "key.fill") {
+            SettingsSection(title: "Authentication", icon: "person.badge.key.fill") {
                 VStack(alignment: .leading, spacing: 8) {
-                    SecureField("sk-ant-api03-...", text: $manager.apiKey)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 12, design: .monospaced))
+                    if manager.isAuthenticated {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.system(size: 14))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Connected")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("via \(manager.credentialSource.rawValue)")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            if !manager.subscriptionType.isEmpty {
+                                Text(manager.subscriptionType.capitalized)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(.purple)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(
+                                        Capsule()
+                                            .fill(Color.purple.opacity(0.12))
+                                    )
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundColor(.orange)
+                                .font(.system(size: 14))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Not connected")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Run `claude login` in Terminal")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
 
-                    HStack(spacing: 8) {
                         Button(action: {
-                            manager.saveAPIKey()
-                            manager.showSettings = false
-                            manager.refresh()
+                            manager.loadCredentials()
+                            if manager.isAuthenticated {
+                                manager.showSettings = false
+                                manager.refresh()
+                            }
                         }) {
                             HStack(spacing: 4) {
-                                Image(systemName: "checkmark")
+                                Image(systemName: "arrow.clockwise")
                                     .font(.system(size: 9, weight: .bold))
-                                Text("Save")
+                                Text("Retry")
                             }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.purple)
                         .controlSize(.small)
-                        .disabled(manager.apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                        if KeychainHelper.load(key: "apiKey") != nil {
-                            Button("Delete", role: .destructive) {
-                                manager.clearAPIKey()
-                            }
-                            .controlSize(.small)
-                        }
-
-                        Spacer()
-
-                        Group {
-                            if manager.apiKeySource != .manual {
-                                Label("Auto-detected", systemImage: "sparkles")
-                                    .foregroundColor(.purple)
-                            } else {
-                                Label("Keychain", systemImage: "lock.shield.fill")
-                                    .foregroundColor(.green)
-                            }
-                        }
-                        .font(.system(size: 10))
                     }
                 }
             }
@@ -202,7 +224,7 @@ struct MenuBarView: View {
 
             SettingsSection(title: "Notifications", icon: "bell.fill") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Alert when tokens are low", isOn: $manager.notificationsEnabled)
+                    Toggle("Alert when usage is high", isOn: $manager.notificationsEnabled)
                         .font(.system(size: 12))
                         .toggleStyle(.switch)
                         .controlSize(.small)
@@ -238,31 +260,17 @@ struct MenuBarView: View {
     // MARK: - Usage
 
     private var usageView: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            UsageBar(
-                label: "Tokens",
-                icon: "text.word.spacing",
-                remaining: manager.tokensRemaining,
-                limit: manager.tokensLimit,
-                percent: manager.tokensPercent,
-                level: manager.tokensLevel
-            )
-
-            UsageBar(
-                label: "Requests",
-                icon: "arrow.up.arrow.down",
-                remaining: manager.requestsRemaining,
-                limit: manager.requestsLimit,
-                percent: manager.requestsPercent,
-                level: manager.requestsLevel
-            )
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(manager.quotas) { quota in
+                QuotaBar(quota: quota)
+            }
 
             // Reset countdown card
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 12))
                     .foregroundColor(.purple.opacity(0.8))
-                Text("Reset in")
+                Text("Next reset")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.secondary)
                 Spacer()
@@ -292,7 +300,7 @@ struct MenuBarView: View {
             ProgressView()
                 .controlSize(.small)
                 .tint(.purple)
-            Text("Fetching rate limits...")
+            Text("Fetching usage...")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
@@ -314,7 +322,7 @@ struct MenuBarView: View {
                 Text(error)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.primary)
-                Text("Check your API key in settings")
+                Text("Check settings for details")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
@@ -360,14 +368,14 @@ struct MenuBarView: View {
                 .padding(.vertical, 4)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(manager.apiKey.isEmpty || manager.isLoading
+                        .fill(!manager.isAuthenticated || manager.isLoading
                               ? Color.clear
                               : Color.purple.opacity(0.1))
                 )
             }
             .buttonStyle(.plain)
             .foregroundColor(manager.isLoading ? .secondary : .purple)
-            .disabled(manager.apiKey.isEmpty || manager.isLoading)
+            .disabled(!manager.isAuthenticated || manager.isLoading)
 
             Spacer()
 
@@ -416,32 +424,25 @@ struct SettingsSection<Content: View>: View {
     }
 }
 
-// MARK: - Usage bar component
+// MARK: - Quota bar component
 
-struct UsageBar: View {
-    let label: String
-    var icon: String = ""
-    let remaining: Int
-    let limit: Int
-    let percent: Double
-    let level: UsageLevel
+struct QuotaBar: View {
+    let quota: UsageQuota
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 HStack(spacing: 5) {
-                    if !icon.isEmpty {
-                        Image(systemName: icon)
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
-                    Text(label)
+                    Image(systemName: quota.icon)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    Text(quota.label)
                         .font(.system(size: 12, weight: .semibold))
                 }
                 Spacer()
-                Text("\(Int(percent))%")
+                Text("\(Int(quota.percentRemaining))%")
                     .font(.system(size: 14, weight: .heavy, design: .monospaced))
-                    .foregroundColor(level.color)
+                    .foregroundColor(quota.level.color)
             }
 
             GeometryReader { geo in
@@ -452,21 +453,23 @@ struct UsageBar: View {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(
                             LinearGradient(
-                                colors: [level.color.opacity(0.7), level.color],
+                                colors: [quota.level.color.opacity(0.7), quota.level.color],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
                         )
-                        .frame(width: max(0, geo.size.width * CGFloat(percent / 100)))
-                        .shadow(color: level.color.opacity(0.3), radius: 3, y: 1)
-                        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: percent)
+                        .frame(width: max(0, geo.size.width * CGFloat(quota.percentRemaining / 100)))
+                        .shadow(color: quota.level.color.opacity(0.3), radius: 3, y: 1)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: quota.percentRemaining)
                 }
             }
             .frame(height: 8)
 
-            Text("\(Formatters.formatNumber(remaining)) / \(Formatters.formatNumber(limit))")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.secondary)
+            if let resetsAt = quota.resetsAt, resetsAt.timeIntervalSinceNow > 0 {
+                Text("Resets \(resetsAt.formatted(date: .omitted, time: .shortened))")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
         }
     }
 }

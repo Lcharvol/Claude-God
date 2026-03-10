@@ -28,6 +28,15 @@ enum RefreshInterval: Int, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Source de la clé API
+
+enum APIKeySource: String {
+    case manual = "Manual"
+    case keychain = "Keychain"
+    case file = "~/.anthropic/api_key"
+    case environment = "ANTHROPIC_API_KEY"
+}
+
 // MARK: - Manager principal
 
 class UsageManager: ObservableObject {
@@ -46,6 +55,7 @@ class UsageManager: ObservableObject {
     // MARK: - État de l'interface
 
     @Published var apiKey: String = ""
+    @Published var apiKeySource: APIKeySource = .manual
     @Published var showSettings: Bool = false
 
     // MARK: - Préférences
@@ -94,11 +104,10 @@ class UsageManager: ObservableObject {
         self.notificationThreshold = UserDefaults.standard.object(forKey: "notificationThreshold") as? Double ?? 20.0
         self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
 
-        // Charger la clé API depuis le Keychain
+        // Charger la clé API (Keychain > fichier > env var)
         self.apiKey = KeychainHelper.load(key: "apiKey") ?? ""
-
-        // Migrer depuis UserDefaults si nécessaire (ancien stockage)
         migrateAPIKeyFromUserDefaults()
+        autoDetectAPIKey()
 
         // Timer de compte à rebours (1 seconde)
         countdownTimer = Timer.publish(every: 1, on: .main, in: .common)
@@ -351,8 +360,38 @@ class UsageManager: ObservableObject {
     private func migrateAPIKeyFromUserDefaults() {
         if apiKey.isEmpty, let oldKey = UserDefaults.standard.string(forKey: "anthropicAPIKey"), !oldKey.isEmpty {
             apiKey = oldKey
+            apiKeySource = .keychain
             KeychainHelper.save(key: "apiKey", value: oldKey)
             UserDefaults.standard.removeObject(forKey: "anthropicAPIKey")
+        }
+    }
+
+    /// Auto-détection de la clé API depuis le fichier Anthropic CLI ou l'env var
+    private func autoDetectAPIKey() {
+        guard apiKey.isEmpty else {
+            apiKeySource = .keychain
+            return
+        }
+
+        // 1. Chercher dans ~/.anthropic/api_key (fichier du CLI Anthropic)
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let filePath = home.appendingPathComponent(".anthropic/api_key")
+        if let fileKey = try? String(contentsOf: filePath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !fileKey.isEmpty {
+            apiKey = fileKey
+            apiKeySource = .file
+            KeychainHelper.save(key: "apiKey", value: fileKey)
+            return
+        }
+
+        // 2. Chercher la variable d'environnement ANTHROPIC_API_KEY
+        if let envKey = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"],
+           !envKey.isEmpty {
+            apiKey = envKey
+            apiKeySource = .environment
+            KeychainHelper.save(key: "apiKey", value: envKey)
+            return
         }
     }
 }

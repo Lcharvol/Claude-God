@@ -118,12 +118,21 @@ struct MenuBarView: View {
 
                         Spacer()
 
-                        Image(systemName: "lock.shield.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(.green)
-                        Text("Keychain")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                        if manager.apiKeySource != .manual {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 10))
+                                .foregroundColor(.purple)
+                            Text("Auto-detected")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        } else {
+                            Image(systemName: "lock.shield.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.green)
+                            Text("Keychain")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
             }

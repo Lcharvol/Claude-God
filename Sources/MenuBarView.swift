@@ -9,121 +9,183 @@ struct MenuBarView: View {
     @ObservedObject var manager: UsageManager
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // -- En-tête --
+        VStack(spacing: 0) {
+            // Header
             header
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
 
             Divider()
 
-            // -- Contenu principal --
-            if manager.apiKey.isEmpty || manager.showSettings {
-                settingsView
-            } else if manager.isLoading && manager.lastRefresh == nil {
-                // Premier chargement
-                ProgressView("Chargement...")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-            } else if let error = manager.errorMessage {
-                errorView(error)
-            } else if manager.tokensLimit > 0 {
-                usageView
-            } else {
-                Text("Cliquez sur Rafraîchir")
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+            // Content
+            Group {
+                if manager.apiKey.isEmpty || manager.showSettings {
+                    settingsView
+                } else if manager.isLoading && manager.lastRefresh == nil {
+                    loadingView
+                } else if let error = manager.errorMessage {
+                    errorView(error)
+                } else if manager.tokensLimit > 0 {
+                    usageView
+                } else {
+                    emptyView
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
 
             Divider()
 
-            // -- Boutons du bas --
+            // Bottom bar
             bottomBar
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
         }
-        .padding()
-        .frame(width: 300)
+        .frame(width: 320)
     }
 
-    // MARK: - Sous-vues
+    // MARK: - Header
 
-    /// En-tête avec titre et bouton réglages
     private var header: some View {
-        HStack {
-            Image(systemName: "c.circle.fill")
-                .foregroundColor(.purple)
-                .font(.title3)
-            Text("Claude Usage")
-                .font(.headline)
+        HStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(
+                        LinearGradient(
+                            colors: [.purple, .indigo],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 24, height: 24)
+                Text("C")
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundColor(.white)
+            }
+
+            Text("Claude God")
+                .font(.system(size: 13, weight: .semibold))
+
             Spacer()
-            // Bouton pour afficher/masquer les réglages
-            Button(action: { manager.showSettings.toggle() }) {
-                Image(systemName: "gearshape")
+
+            if manager.lastRefresh != nil && !manager.showSettings {
+                Text(manager.lastRefresh?.formatted(date: .omitted, time: .shortened) ?? "")
+                    .font(.system(size: 10))
                     .foregroundColor(.secondary)
+            }
+
+            Button(action: { manager.showSettings.toggle() }) {
+                Image(systemName: manager.showSettings ? "xmark" : "gearshape")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
     }
 
-    /// Vue des réglages (saisie de la clé API)
+    // MARK: - Settings
+
     private var settingsView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Clé API Anthropic")
-                .font(.caption)
-                .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
 
-            SecureField("sk-ant-api03-...", text: $manager.apiKey)
-                .textFieldStyle(.roundedBorder)
+            // API Key
+            SettingsSection(title: "API Key") {
+                VStack(alignment: .leading, spacing: 6) {
+                    SecureField("sk-ant-api03-...", text: $manager.apiKey)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
 
-            Text("Trouvez votre clé sur console.anthropic.com")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+                    HStack(spacing: 8) {
+                        Button("Save") {
+                            manager.saveAPIKey()
+                            manager.showSettings = false
+                            manager.refresh()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
+                        .controlSize(.small)
+                        .disabled(manager.apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
 
-            HStack {
-                Button("Sauvegarder") {
-                    manager.saveAPIKey()
-                    manager.showSettings = false
-                    manager.refresh()
-                }
-                .disabled(manager.apiKey.isEmpty)
+                        if KeychainHelper.load(key: "apiKey") != nil {
+                            Button("Delete", role: .destructive) {
+                                manager.clearAPIKey()
+                            }
+                            .controlSize(.small)
+                        }
 
-                if !manager.apiKey.isEmpty {
-                    Button("Supprimer") {
-                        manager.clearAPIKey()
+                        Spacer()
+
+                        Image(systemName: "lock.shield.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.green)
+                        Text("Keychain")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
                     }
-                    .foregroundColor(.red)
                 }
+            }
+
+            // Auto-refresh
+            SettingsSection(title: "Auto-refresh") {
+                Picker("Interval", selection: $manager.refreshInterval) {
+                    ForEach(RefreshInterval.allCases) { interval in
+                        Text(interval.label).tag(interval)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            }
+
+            // Notifications
+            SettingsSection(title: "Notifications") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Alert when tokens are low", isOn: $manager.notificationsEnabled)
+                        .font(.system(size: 12))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+
+                    if manager.notificationsEnabled {
+                        HStack(spacing: 8) {
+                            Text("Threshold")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            Slider(value: $manager.notificationThreshold, in: 5...50, step: 5)
+                                .controlSize(.small)
+                            Text("\(Int(manager.notificationThreshold))%")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .frame(width: 32, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+
+            // Launch at Login
+            SettingsSection(title: "System") {
+                Toggle("Launch at login", isOn: $manager.launchAtLogin)
+                    .font(.system(size: 12))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
             }
         }
     }
 
-    /// Vue d'erreur
-    private func errorView(_ error: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundColor(.orange)
-                .font(.title2)
-            Text(error)
-                .foregroundColor(.secondary)
-                .font(.caption)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-    }
+    // MARK: - Usage
 
-    /// Vue principale avec les données d'utilisation
     private var usageView: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Barre de tokens
-            UsageRow(
+        VStack(alignment: .leading, spacing: 12) {
+            UsageBar(
                 label: "Tokens",
                 remaining: manager.tokensRemaining,
                 limit: manager.tokensLimit,
                 percent: manager.tokensPercent
             )
 
-            // Barre de requêtes
-            UsageRow(
-                label: "Requêtes",
+            UsageBar(
+                label: "Requests",
                 remaining: manager.requestsRemaining,
                 limit: manager.requestsLimit,
                 percent: manager.requestsPercent
@@ -131,66 +193,131 @@ struct MenuBarView: View {
 
             Divider()
 
-            // Temps avant reset
-            HStack {
-                Image(systemName: "clock")
+            // Reset countdown
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 10))
                     .foregroundColor(.secondary)
-                    .font(.caption)
-                Text("Reset dans :")
-                    .font(.caption)
+                Text("Reset in")
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(manager.timeUntilReset)
-                    .font(.caption.monospacedDigit())
-                    .fontWeight(.medium)
-            }
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
 
-            // Dernière mise à jour
-            if let lastRefresh = manager.lastRefresh {
-                HStack {
-                    Spacer()
-                    Text("Mis à jour : \(lastRefresh.formatted(date: .omitted, time: .shortened))")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                // Auto-refresh indicator
+                if manager.refreshInterval != .off {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 8))
+                        .foregroundColor(.purple.opacity(0.7))
+                        .help("Auto-refresh: \(manager.refreshInterval.label)")
                 }
             }
         }
     }
 
-    /// Barre de boutons en bas
+    // MARK: - States
+
+    private var loadingView: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Loading...")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+
+    private func errorView(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+                .font(.system(size: 14))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundColor(.primary)
+                Text("Check your API key in settings")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var emptyView: some View {
+        Text("Click Refresh to load data")
+            .font(.system(size: 12))
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+    }
+
+    // MARK: - Bottom bar
+
     private var bottomBar: some View {
-        HStack {
+        HStack(spacing: 12) {
             Button(action: { manager.refresh() }) {
                 HStack(spacing: 4) {
                     if manager.isLoading {
                         ProgressView()
-                            .controlSize(.small)
+                            .controlSize(.mini)
                     } else {
                         Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10, weight: .semibold))
                     }
-                    Text("Rafraîchir")
+                    Text("Refresh")
+                        .font(.system(size: 11, weight: .medium))
                 }
             }
+            .buttonStyle(.plain)
+            .foregroundColor(manager.isLoading ? .secondary : .purple)
             .disabled(manager.apiKey.isEmpty || manager.isLoading)
 
             Spacer()
 
-            Button("Quitter") {
-                NSApplication.shared.terminate(nil)
+            Text("v1.1")
+                .font(.system(size: 9))
+                .foregroundColor(.secondary.opacity(0.5))
+
+            Button(action: { NSApplication.shared.terminate(nil) }) {
+                Text("Quit")
+                    .font(.system(size: 11, weight: .medium))
             }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
         }
     }
 }
 
-// MARK: - Composant : ligne d'utilisation avec barre de progression
+// MARK: - Settings section wrapper
 
-struct UsageRow: View {
+struct SettingsSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .tracking(0.8)
+            content
+        }
+    }
+}
+
+// MARK: - Usage bar component
+
+struct UsageBar: View {
     let label: String
     let remaining: Int
     let limit: Int
     let percent: Double
 
-    /// Couleur selon le pourcentage restant
     private var barColor: Color {
         if percent > 50 { return .green }
         if percent > 20 { return .orange }
@@ -198,45 +325,50 @@ struct UsageRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // Label + pourcentage
-            HStack {
+        VStack(alignment: .leading, spacing: 5) {
+            // Label row
+            HStack(alignment: .firstTextBaseline) {
                 Text(label)
-                    .font(.caption)
-                    .fontWeight(.medium)
+                    .font(.system(size: 11, weight: .semibold))
+
                 Spacer()
+
                 Text("\(Int(percent))%")
-                    .font(.caption.monospacedDigit())
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundColor(barColor)
-                    .fontWeight(.semibold)
             }
 
-            // Barre de progression
+            // Progress bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    // Fond gris
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.gray.opacity(0.2))
-                    // Barre colorée
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(barColor)
-                        .frame(width: geo.size.width * CGFloat(percent / 100))
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.primary.opacity(0.06))
+
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(
+                            LinearGradient(
+                                colors: [barColor.opacity(0.8), barColor],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(0, geo.size.width * CGFloat(percent / 100)))
+                        .animation(.easeInOut(duration: 0.6), value: percent)
                 }
             }
-            .frame(height: 8)
+            .frame(height: 6)
 
-            // Détail : remaining / limit
+            // Detail
             Text("\(formatNumber(remaining)) / \(formatNumber(limit))")
-                .font(.caption2)
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.secondary)
         }
     }
 
-    /// Formate un nombre avec des séparateurs de milliers (ex: 80 000)
     private func formatNumber(_ n: Int) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
-        formatter.groupingSeparator = " "
+        formatter.groupingSeparator = ","
         return formatter.string(from: NSNumber(value: n)) ?? "\(n)"
     }
 }

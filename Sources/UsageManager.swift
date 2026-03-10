@@ -1,12 +1,38 @@
 // UsageManager.swift
-// Gère la logique : appels API, stockage des données, calculs
+// Gère la logique : appels API, stockage des données, calculs, notifications
 
 import Foundation
 import Combine
+import UserNotifications
+import ServiceManagement
+
+// MARK: - Intervalle d'auto-refresh
+
+enum RefreshInterval: Int, CaseIterable, Identifiable {
+    case off = 0
+    case oneMin = 60
+    case twoMin = 120
+    case fiveMin = 300
+    case tenMin = 600
+
+    var id: Int { rawValue }
+
+    var label: String {
+        switch self {
+        case .off: return "Off"
+        case .oneMin: return "1 min"
+        case .twoMin: return "2 min"
+        case .fiveMin: return "5 min"
+        case .tenMin: return "10 min"
+        }
+    }
+}
+
+// MARK: - Manager principal
 
 class UsageManager: ObservableObject {
 
-    // MARK: - Données publiées (la vue se met à jour automatiquement quand elles changent)
+    // MARK: - Données d'utilisation
 
     @Published var tokensRemaining: Int = 0
     @Published var tokensLimit: Int = 0
@@ -15,28 +41,82 @@ class UsageManager: ObservableObject {
     @Published var resetTime: Date? = nil
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
-    @Published var apiKey: String = ""
-    @Published var showSettings: Bool = false
     @Published var lastRefresh: Date? = nil
 
-    // Timer pour mettre à jour le compte à rebours chaque seconde
+    // MARK: - État de l'interface
+
+    @Published var apiKey: String = ""
+    @Published var showSettings: Bool = false
+
+    // MARK: - Préférences
+
+    @Published var refreshInterval: RefreshInterval {
+        didSet {
+            UserDefaults.standard.set(refreshInterval.rawValue, forKey: "refreshInterval")
+            setupAutoRefresh()
+        }
+    }
+
+    @Published var notificationsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(notificationsEnabled, forKey: "notificationsEnabled")
+            if notificationsEnabled { requestNotificationPermission() }
+        }
+    }
+
+    @Published var notificationThreshold: Double {
+        didSet {
+            UserDefaults.standard.set(notificationThreshold, forKey: "notificationThreshold")
+        }
+    }
+
+    @Published var launchAtLogin: Bool {
+        didSet {
+            UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
+            updateLoginItem()
+        }
+    }
+
+    // MARK: - Timers
+
     private var countdownTimer: AnyCancellable?
+    private var autoRefreshTimer: AnyCancellable?
+    private var resetCheckTimer: AnyCancellable?
+    private var hasNotifiedLowUsage: Bool = false
 
     // MARK: - Initialisation
 
     init() {
-        // Charger la clé API sauvegardée
-        self.apiKey = UserDefaults.standard.string(forKey: "anthropicAPIKey") ?? ""
+        // Charger les préférences
+        let savedInterval = UserDefaults.standard.integer(forKey: "refreshInterval")
+        self.refreshInterval = RefreshInterval(rawValue: savedInterval) ?? .fiveMin
+        self.notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
+        self.notificationThreshold = UserDefaults.standard.object(forKey: "notificationThreshold") as? Double ?? 20.0
+        self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
 
-        // Démarrer le timer du compte à rebours
+        // Charger la clé API depuis le Keychain
+        self.apiKey = KeychainHelper.load(key: "apiKey") ?? ""
+
+        // Migrer depuis UserDefaults si nécessaire (ancien stockage)
+        migrateAPIKeyFromUserDefaults()
+
+        // Timer de compte à rebours (1 seconde)
         countdownTimer = Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
-                // Force la vue à se rafraîchir (pour le compte à rebours)
                 self?.objectWillChange.send()
+                self?.checkResetExpired()
             }
 
-        // Si on a déjà une clé, rafraîchir au lancement
+        // Configurer l'auto-refresh
+        setupAutoRefresh()
+
+        // Demander les permissions de notification
+        if notificationsEnabled {
+            requestNotificationPermission()
+        }
+
+        // Rafraîchir au lancement si on a une clé
         if !apiKey.isEmpty {
             refresh()
         }
@@ -44,29 +124,25 @@ class UsageManager: ObservableObject {
 
     // MARK: - Propriétés calculées
 
-    /// Pourcentage de tokens restants (ex: 75 = il reste 75%)
     var tokensPercent: Double {
         guard tokensLimit > 0 else { return 0 }
         return Double(tokensRemaining) / Double(tokensLimit) * 100
     }
 
-    /// Pourcentage de requêtes restantes
     var requestsPercent: Double {
         guard requestsLimit > 0 else { return 0 }
         return Double(requestsRemaining) / Double(requestsLimit) * 100
     }
 
-    /// Texte affiché dans la barre de menu
     var menuBarTitle: String {
         guard tokensLimit > 0 else { return "—" }
         return "\(Int(tokensPercent))%"
     }
 
-    /// Temps restant avant le reset, formaté en texte lisible
     var timeUntilReset: String {
         guard let reset = resetTime else { return "—" }
         let remaining = reset.timeIntervalSinceNow
-        if remaining <= 0 { return "maintenant" }
+        if remaining <= 0 { return "now" }
         let hours = Int(remaining) / 3600
         let minutes = (Int(remaining) % 3600) / 60
         let seconds = Int(remaining) % 60
@@ -76,36 +152,42 @@ class UsageManager: ObservableObject {
         return "\(minutes)m \(seconds)s"
     }
 
-    // MARK: - Actions
-
-    /// Sauvegarder la clé API
-    func saveAPIKey() {
-        UserDefaults.standard.set(apiKey, forKey: "anthropicAPIKey")
+    /// Couleur selon le niveau d'utilisation (pour l'icône menu bar)
+    var statusColor: String {
+        if tokensLimit == 0 { return "secondary" }
+        if tokensPercent > 50 { return "green" }
+        if tokensPercent > 20 { return "orange" }
+        return "red"
     }
 
-    /// Supprimer la clé API
+    // MARK: - Actions
+
+    func saveAPIKey() {
+        KeychainHelper.save(key: "apiKey", value: apiKey)
+    }
+
     func clearAPIKey() {
         apiKey = ""
-        UserDefaults.standard.removeObject(forKey: "anthropicAPIKey")
+        KeychainHelper.delete(key: "apiKey")
         tokensRemaining = 0
         tokensLimit = 0
         requestsRemaining = 0
         requestsLimit = 0
         resetTime = nil
         lastRefresh = nil
+        errorMessage = nil
+        hasNotifiedLowUsage = false
     }
 
-    /// Appeler l'API Anthropic pour récupérer les limites d'utilisation
     func refresh() {
         guard !apiKey.isEmpty else {
-            errorMessage = "Clé API manquante"
+            errorMessage = "API key missing"
             return
         }
 
         isLoading = true
         errorMessage = nil
 
-        // Construire la requête HTTP
         guard let url = URL(string: "https://api.anthropic.com/v1/messages") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -113,18 +195,14 @@ class UsageManager: ObservableObject {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
 
-        // Requête minimale : 1 seul token de réponse pour minimiser le coût
-        // Coût : quasi nul (quelques fractions de centime)
         let body: [String: Any] = [
             "model": "claude-haiku-4-5-20251001",
             "max_tokens": 1,
-            "messages": [["role": "user", "content": "hi"]]
+            "messages": [["role": "user", "content": "h"]]
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        // Envoyer la requête
         URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
-            // Revenir sur le thread principal pour mettre à jour l'UI
             DispatchQueue.main.async {
                 self?.isLoading = false
 
@@ -134,30 +212,113 @@ class UsageManager: ObservableObject {
                 }
 
                 guard let httpResponse = response as? HTTPURLResponse else {
-                    self?.errorMessage = "Réponse invalide"
+                    self?.errorMessage = "Invalid response"
                     return
                 }
 
-                // Vérifier le code HTTP
                 if httpResponse.statusCode == 401 {
-                    self?.errorMessage = "Clé API invalide"
+                    self?.errorMessage = "Invalid API key"
                     return
                 }
 
                 if httpResponse.statusCode == 403 {
-                    self?.errorMessage = "Accès refusé"
+                    self?.errorMessage = "Access denied"
                     return
                 }
 
-                // Lire les headers de rate limit
-                // L'API Anthropic renvoie ces infos dans chaque réponse
+                if httpResponse.statusCode == 429 {
+                    self?.errorMessage = "Rate limited — try again later"
+                    // On parse quand même les headers car ils sont présents sur les 429
+                    self?.parseRateLimitHeaders(httpResponse)
+                    self?.lastRefresh = Date()
+                    return
+                }
+
                 self?.parseRateLimitHeaders(httpResponse)
                 self?.lastRefresh = Date()
+                self?.checkLowUsageNotification()
             }
         }.resume()
     }
 
-    /// Extraire les informations de rate limit des headers HTTP
+    // MARK: - Auto-refresh
+
+    private func setupAutoRefresh() {
+        autoRefreshTimer?.cancel()
+        autoRefreshTimer = nil
+
+        guard refreshInterval != .off else { return }
+
+        autoRefreshTimer = Timer.publish(
+            every: TimeInterval(refreshInterval.rawValue),
+            on: .main,
+            in: .common
+        )
+        .autoconnect()
+        .sink { [weak self] _ in
+            self?.refresh()
+        }
+    }
+
+    /// Vérifie si le reset est passé et rafraîchit automatiquement
+    private func checkResetExpired() {
+        guard let reset = resetTime else { return }
+        if reset.timeIntervalSinceNow <= 0 && lastRefresh != nil {
+            // Le reset vient d'expirer — rafraîchir pour avoir les nouvelles limites
+            resetTime = nil
+            hasNotifiedLowUsage = false
+            refresh()
+        }
+    }
+
+    // MARK: - Notifications
+
+    private func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func checkLowUsageNotification() {
+        guard notificationsEnabled else { return }
+        guard tokensLimit > 0 else { return }
+        guard tokensPercent <= notificationThreshold else {
+            hasNotifiedLowUsage = false
+            return
+        }
+        guard !hasNotifiedLowUsage else { return }
+
+        hasNotifiedLowUsage = true
+
+        let content = UNMutableNotificationContent()
+        content.title = "Claude God"
+        content.body = "Tokens remaining: \(Int(tokensPercent))% (\(formatCompact(tokensRemaining)) left)"
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "low-usage-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    // MARK: - Launch at Login
+
+    private func updateLoginItem() {
+        if #available(macOS 13.0, *) {
+            do {
+                if launchAtLogin {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                // Silently ignore — user may not have granted permission
+            }
+        }
+    }
+
+    // MARK: - Parsing
+
     private func parseRateLimitHeaders(_ response: HTTPURLResponse) {
         if let value = response.value(forHTTPHeaderField: "anthropic-ratelimit-tokens-limit") {
             tokensLimit = Int(value) ?? 0
@@ -175,6 +336,23 @@ class UsageManager: ObservableObject {
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             resetTime = formatter.date(from: value)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func formatCompact(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
+    }
+
+    /// Migre la clé API depuis UserDefaults (ancien stockage) vers Keychain
+    private func migrateAPIKeyFromUserDefaults() {
+        if apiKey.isEmpty, let oldKey = UserDefaults.standard.string(forKey: "anthropicAPIKey"), !oldKey.isEmpty {
+            apiKey = oldKey
+            KeychainHelper.save(key: "apiKey", value: oldKey)
+            UserDefaults.standard.removeObject(forKey: "anthropicAPIKey")
         }
     }
 }

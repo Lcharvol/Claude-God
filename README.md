@@ -2,40 +2,39 @@
 
 A lightweight macOS menu bar app that monitors your Anthropic API rate limits in real time.
 
+[![CI](https://github.com/Lcharvol/Claude-God/actions/workflows/ci.yml/badge.svg)](https://github.com/Lcharvol/Claude-God/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Lcharvol/Claude-God)](https://github.com/Lcharvol/Claude-God/releases/latest)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue)
-![Swift](https://img.shields.io/badge/Swift-5.9-orange)
-![SwiftUI](https://img.shields.io/badge/SwiftUI-MenuBarExtra-purple)
-![License](https://img.shields.io/badge/license-MIT-green)
-
-## What it does
-
-Claude God sits in your macOS menu bar and shows how much API capacity you have left before hitting Anthropic's rate limits.
-
-**Menu bar:** displays a `C` icon with your remaining token percentage.
-
-**Click to expand:**
-- Token usage with color-coded progress bar (green/orange/red)
-- Request usage with progress bar
-- Live countdown until rate limit resets
-- One-click refresh
-- API key management
+![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ## Download
 
 **[Download the latest .dmg](https://github.com/Lcharvol/Claude-God/releases/latest)** — no Xcode required.
 
-1. Open the `.dmg`
-2. Drag **Claude God** to your Applications folder
-3. Launch it — click the `C` icon in the menu bar
-4. Paste your [Anthropic API key](https://console.anthropic.com/) and hit Save
+1. Open the `.dmg`, drag **Claude God** to Applications
+2. Launch it — a `C` icon appears in the menu bar
+3. Click the icon, paste your [Anthropic API key](https://console.anthropic.com/), hit Save
 
 That's it.
 
+## Features
+
+- **Menu bar native** — always visible, no dock icon, no window
+- **Auto-refresh** — configurable interval (1, 2, 5, 10 min or off)
+- **Live countdown** — see exactly when rate limits reset
+- **Color-coded bars** — green/orange/red at a glance
+- **Notifications** — alert when tokens drop below a configurable threshold
+- **Keychain storage** — API key encrypted by macOS, not plain text
+- **Launch at login** — start automatically with your Mac
+- **Near-zero cost** — each refresh uses 1 Haiku token (~$0.00001)
+- **Fully private** — no server, no telemetry, no tracking
+
 ## How it works
 
-The app sends a minimal API request (1 token via Haiku, cost ~$0.00001) and reads the rate limit headers that Anthropic returns with every response:
+The app sends a minimal API request (1 token) and reads the rate limit headers Anthropic returns:
 
-| Header | What it tells us |
+| Header | Info |
 |---|---|
 | `anthropic-ratelimit-tokens-limit` | Max tokens per window |
 | `anthropic-ratelimit-tokens-remaining` | Tokens left |
@@ -48,67 +47,57 @@ The app sends a minimal API request (1 token via Haiku, cost ~$0.00001) and read
 Requires macOS 13+ and Xcode 15+.
 
 ```bash
-# Clone
 git clone https://github.com/Lcharvol/Claude-God.git
 cd Claude-God
-
-# Install xcodegen (one time)
-brew install xcodegen
-
-# Generate Xcode project and build
-xcodegen generate
-xcodebuild -project ClaudeGod.xcodeproj -scheme ClaudeGod -configuration Release build
+brew install xcodegen    # one time
+make build               # or: make open (opens in Xcode)
 ```
 
-Or open `ClaudeGod.xcodeproj` in Xcode and press `Cmd + R`.
+See the [Makefile](Makefile) for all commands: `make build`, `make run`, `make dmg`, `make clean`.
 
 ## Project structure
 
 ```
 Claude-God/
 ├── Sources/
-│   ├── ClaudeUsageApp.swift       # App entry point, MenuBarExtra setup
-│   ├── UsageManager.swift         # API calls, data management, state
-│   └── MenuBarView.swift          # UI: popover with usage bars and controls
+│   ├── ClaudeUsageApp.swift       # App entry point, MenuBarExtra
+│   ├── UsageManager.swift         # API calls, auto-refresh, notifications
+│   ├── MenuBarView.swift          # UI: settings, usage bars, controls
+│   ├── KeychainHelper.swift       # Secure API key storage
+│   └── ClaudeGod.entitlements     # Network permissions
 ├── docs/
-│   └── index.html                 # Landing page (GitHub Pages)
+│   ├── index.html                 # Landing page (claudegod.app)
+│   └── CNAME                      # Custom domain config
 ├── .github/
-│   └── workflows/
-│       └── build.yml              # CI: auto-build + release on tag push
-├── project.yml                    # Xcodegen spec (generates .xcodeproj)
-└── README.md
+│   ├── workflows/
+│   │   ├── ci.yml                 # Build check on push & PRs
+│   │   └── build.yml              # Release: build DMG on tag push
+│   ├── ISSUE_TEMPLATE/            # Bug report & feature request templates
+│   └── pull_request_template.md
+├── project.yml                    # Xcodegen spec
+├── Makefile                       # Build commands
+├── CHANGELOG.md                   # Version history
+└── LICENSE                        # MIT
 ```
 
-**Zero external dependencies.** Only Foundation, SwiftUI, and Combine.
+**Zero external dependencies.** Only Foundation, SwiftUI, Combine, Security, UserNotifications, and ServiceManagement.
 
-## Releasing a new version
+## Releasing
 
-Push a git tag and GitHub Actions builds the `.dmg` automatically:
+Push a tag and GitHub Actions builds the `.dmg` automatically:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
-
-A new GitHub Release with the `.dmg` attached will be created within minutes.
-
-## Landing page
-
-The `docs/` folder contains a static landing page. To enable it:
-
-1. Go to your repo **Settings** → **Pages**
-2. Set source to **Deploy from a branch**
-3. Branch: `main`, folder: `/docs`
-4. Your site will be live at `https://lcharvol.github.io/Claude-God/`
 
 ## Roadmap
 
-- [ ] Auto-refresh on a configurable interval
-- [ ] macOS notification when usage drops below a threshold
-- [ ] Store API key in Keychain instead of UserDefaults
-- [ ] Launch at login support
 - [ ] Track multiple models (different rate limits per model)
+- [ ] Usage history graph
+- [ ] Global keyboard shortcut to open popover
+- [ ] Homebrew cask distribution
 
 ## License
 
-MIT
+[MIT](LICENSE)

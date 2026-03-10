@@ -5,10 +5,28 @@
 build/
 DerivedData/
 *.dmg
+dmg-contents/
 
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
 
 # Xcode user state
 *.xcuserstate
 *.xcuserdatad
+*.xcscmblueprint
+*.xccheckout
+xcuserdata/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# IDE
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

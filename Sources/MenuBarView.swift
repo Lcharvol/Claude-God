@@ -1,36 +1,53 @@
 // MenuBarView.swift
-// L'interface qui s'affiche quand on clique sur l'icône dans la menu bar
+// shadcn-inspired UI — flat, minimal, bordered, muted palette
 
 import SwiftUI
 
-// MARK: - Vue principale
+// MARK: - Design tokens
+
+private enum Theme {
+    static let radius: CGFloat = 8
+    static let radiusLg: CGFloat = 10
+    static let border = Color.primary.opacity(0.08)
+    static let borderHover = Color.primary.opacity(0.15)
+    static let muted = Color.primary.opacity(0.04)
+    static let mutedHover = Color.primary.opacity(0.08)
+    static let accent = Color(red: 0.56, green: 0.39, blue: 0.98)  // indigo-ish
+    static let accentMuted = Color(red: 0.56, green: 0.39, blue: 0.98).opacity(0.1)
+}
+
+// MARK: - Main view
 
 struct MenuBarView: View {
     @ObservedObject var manager: UsageManager
     @State private var copiedFeedback = false
-    @State private var hoveredQuotaId: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
+            // Header
             header
                 .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
 
+            SHDivider()
+
+            // Tabs
+            if manager.isAuthenticated && !manager.showSettings {
+                tabBar
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                SHDivider()
+            }
+
+            // Update
             if manager.updateAvailable {
                 updateBanner
-            }
-
-            // Navigation tabs
-            if manager.isAuthenticated && !manager.showSettings {
-                navTabs
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                    .padding(.top, 10)
             }
 
-            Divider()
-                .opacity(0.3)
-
+            // Content
             ScrollView(.vertical, showsIndicators: false) {
                 Group {
                     if !manager.isAuthenticated || manager.showSettings {
@@ -54,108 +71,80 @@ struct MenuBarView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .frame(maxHeight: 420)
+            .frame(maxHeight: 600)
 
-            Divider()
-                .opacity(0.3)
+            SHDivider()
 
+            // Footer
             bottomBar
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
         }
-        .frame(width: manager.compactMode && !manager.showSettings && !manager.showStats ? 280 : 360)
-        .animation(.easeInOut(duration: 0.2), value: manager.showStats)
-        .animation(.easeInOut(duration: 0.2), value: manager.showSettings)
+        .frame(width: manager.compactMode && !manager.showSettings && !manager.showStats ? 280 : 340)
+        .animation(.easeOut(duration: 0.15), value: manager.showStats)
+        .animation(.easeOut(duration: 0.15), value: manager.showSettings)
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 10) {
-            // App icon
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.55, green: 0.25, blue: 1.0),
-                                Color(red: 0.40, green: 0.18, blue: 0.95)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 30, height: 30)
-                    .shadow(color: Color(red: 0.55, green: 0.25, blue: 1.0).opacity(0.4), radius: 6, y: 3)
-                Text("C")
-                    .font(.system(size: 15, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-            }
+        HStack(spacing: 8) {
+            // Logo
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Theme.accent)
+                .frame(width: 26, height: 26)
+                .overlay(
+                    Text("C")
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundColor(.white)
+                )
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text("Claude God")
-                    .font(.system(size: 14, weight: .bold))
-                HStack(spacing: 4) {
-                    if !manager.subscriptionType.isEmpty {
-                        Text(manager.subscriptionType.capitalized)
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [.purple, .purple.opacity(0.7)],
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        )
-                                    )
-                            )
-                    }
-                    if let lastRefresh = manager.lastRefresh, !manager.showSettings && !manager.showStats {
-                        HStack(spacing: 3) {
-                            Circle()
-                                .fill(.green)
-                                .frame(width: 4, height: 4)
-                            Text(lastRefresh.formatted(date: .omitted, time: .shortened))
-                                .font(.system(size: 9))
-                                .foregroundColor(.secondary)
-                        }
-                    }
+                    .font(.system(size: 13, weight: .semibold))
+                if !manager.subscriptionType.isEmpty {
+                    Text(manager.subscriptionType.capitalized)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
                 }
             }
 
             Spacer()
 
-            // Settings button
-            IconButton(
-                icon: manager.showSettings ? "xmark" : "gearshape.fill",
-                isActive: manager.showSettings
-            ) {
-                withAnimation(.spring(response: 0.3)) {
-                    manager.showSettings.toggle()
-                    if manager.showSettings { manager.showStats = false }
-                }
+            if let lastRefresh = manager.lastRefresh, !manager.showSettings && !manager.showStats {
+                Text(lastRefresh.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Theme.muted)
+                    )
+            }
+
+            SHIconButton(icon: manager.showSettings ? "xmark" : "gearshape") {
+                manager.showSettings.toggle()
+                if manager.showSettings { manager.showStats = false }
             }
         }
     }
 
-    // MARK: - Navigation tabs
+    // MARK: - Tabs
 
-    private var navTabs: some View {
-        HStack(spacing: 2) {
-            TabPill(label: "Usage", icon: "gauge.medium", isActive: !manager.showStats) {
-                withAnimation(.spring(response: 0.3)) { manager.showStats = false }
+    private var tabBar: some View {
+        HStack(spacing: 1) {
+            SHTab(label: "Usage", isActive: !manager.showStats) {
+                manager.showStats = false
             }
-            TabPill(label: "Stats", icon: "chart.bar.fill", isActive: manager.showStats) {
-                withAnimation(.spring(response: 0.3)) { manager.showStats = true }
+            SHTab(label: "Analytics", isActive: manager.showStats) {
+                manager.showStats = true
             }
         }
-        .padding(3)
+        .padding(2)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(0.04))
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Theme.muted)
         )
     }
 
@@ -163,86 +152,61 @@ struct MenuBarView: View {
 
     private var updateBanner: some View {
         HStack(spacing: 10) {
-            Image(systemName: "arrow.down.circle.fill")
-                .foregroundStyle(
-                    LinearGradient(colors: [.purple, .blue], startPoint: .top, endPoint: .bottom)
-                )
-                .font(.system(size: 20))
+            Image(systemName: "arrow.down.circle")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Theme.accent)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text("v\(manager.latestVersion) available")
-                    .font(.system(size: 11, weight: .semibold))
-                Text("v\(UsageManager.currentVersion) installed")
-                    .font(.system(size: 9))
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Update available")
+                    .font(.system(size: 11, weight: .medium))
+                Text("v\(UsageManager.currentVersion) → v\(manager.latestVersion)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(.secondary)
             }
+
             Spacer()
-            Button("Update") {
+
+            SHButton(label: "Update", style: .primary) {
                 manager.installUpdate()
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.purple)
-            .controlSize(.small)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.purple.opacity(0.2), lineWidth: 1)
+            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                .strokeBorder(Theme.accent.opacity(0.2), lineWidth: 1)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                        .fill(Theme.accentMuted)
                 )
         )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 4)
     }
 
     // MARK: - Settings
 
     private var settingsView: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            GlassCard {
-                SettingsSection(title: "Authentication", icon: "person.badge.key.fill") {
+        VStack(spacing: 10) {
+            // Auth
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    SHLabel("Authentication")
+
                     if manager.isAuthenticated {
-                        HStack(spacing: 10) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.green.opacity(0.15))
-                                    .frame(width: 32, height: 32)
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                                    .font(.system(size: 16))
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Connected")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text("via \(manager.credentialSource.rawValue)")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
+                        HStack(spacing: 8) {
+                            SHBadge(text: "Connected", color: .green)
                             Spacer()
+                            Text(manager.credentialSource.rawValue)
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundColor(.secondary)
                         }
                     } else {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(spacing: 10) {
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.orange.opacity(0.15))
-                                        .frame(width: 32, height: 32)
-                                    Image(systemName: "exclamationmark.circle.fill")
-                                        .foregroundColor(.orange)
-                                        .font(.system(size: 16))
-                                }
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Not connected")
-                                        .font(.system(size: 12, weight: .semibold))
-                                    Text("Run `claude login` in Terminal")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
-                                }
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                SHBadge(text: "Not connected", color: .orange)
                             }
-                            PillButton(label: "Retry", icon: "arrow.clockwise") {
+                            Text("Run `claude login` in Terminal")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            SHButton(label: "Retry", icon: "arrow.clockwise", style: .outline) {
                                 manager.loadCredentials()
                                 if manager.isAuthenticated {
                                     manager.showSettings = false
@@ -254,8 +218,10 @@ struct MenuBarView: View {
                 }
             }
 
-            GlassCard {
-                SettingsSection(title: "Auto-refresh", icon: "arrow.triangle.2.circlepath") {
+            // Refresh
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    SHLabel("Auto-refresh")
                     Picker("Interval", selection: $manager.refreshInterval) {
                         ForEach(RefreshInterval.allCases) { interval in
                             Text(interval.label).tag(interval)
@@ -266,243 +232,259 @@ struct MenuBarView: View {
                 }
             }
 
-            GlassCard {
-                SettingsSection(title: "Notifications", icon: "bell.fill") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Alert when usage is high", isOn: $manager.notificationsEnabled)
-                            .font(.system(size: 12))
-                            .toggleStyle(.switch)
-                            .controlSize(.small)
-                            .tint(.purple)
+            // Notifications
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    SHLabel("Notifications")
+                    Toggle("Alert when usage is high", isOn: $manager.notificationsEnabled)
+                        .font(.system(size: 12))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
 
-                        if manager.notificationsEnabled {
-                            HStack(spacing: 8) {
-                                Text("Threshold")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                                Slider(value: $manager.notificationThreshold, in: 5...50, step: 5)
-                                    .controlSize(.small)
-                                    .tint(.purple)
-                                Text("\(Int(manager.notificationThreshold))%")
-                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundColor(.purple)
-                                    .frame(width: 32, alignment: .trailing)
-                            }
+                    if manager.notificationsEnabled {
+                        HStack(spacing: 6) {
+                            Text("at")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            Text("\(Int(manager.notificationThreshold))%")
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .frame(width: 28)
+                            Slider(value: $manager.notificationThreshold, in: 5...50, step: 5)
+                                .controlSize(.small)
                         }
                     }
                 }
             }
 
-            GlassCard {
-                SettingsSection(title: "Display", icon: "rectangle.on.rectangle") {
+            // Display + System
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    SHLabel("Preferences")
                     Toggle("Compact mode", isOn: $manager.compactMode)
                         .font(.system(size: 12))
                         .toggleStyle(.switch)
                         .controlSize(.small)
-                        .tint(.purple)
-                }
-            }
-
-            GlassCard {
-                SettingsSection(title: "System", icon: "laptopcomputer") {
+                    SHDivider()
                     Toggle("Launch at login", isOn: $manager.launchAtLogin)
                         .font(.system(size: 12))
                         .toggleStyle(.switch)
                         .controlSize(.small)
-                        .tint(.purple)
                 }
             }
         }
     }
 
-    // MARK: - Usage (full)
+    // MARK: - Usage
 
     private var usageView: some View {
-        VStack(spacing: 10) {
-            // Circular gauges row
-            HStack(spacing: 0) {
-                ForEach(manager.quotas) { quota in
-                    CircularGauge(quota: quota, isHovered: hoveredQuotaId == quota.id)
-                        .onHover { hovering in
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                hoveredQuotaId = hovering ? quota.id : nil
+        VStack(spacing: 8) {
+            ForEach(manager.quotas) { quota in
+                SHCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            HStack(spacing: 5) {
+                                Image(systemName: quota.icon)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                Text(quota.label)
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            Spacer()
+                            Text("\(Int(quota.utilization))%")
+                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .foregroundColor(quota.level.color)
+                        }
+
+                        // Progress bar
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Theme.muted)
+
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(quota.level.color)
+                                    .frame(width: max(0, geo.size.width * CGFloat(min(quota.utilization, 100) / 100)))
+                                    .animation(.easeOut(duration: 0.6), value: quota.utilization)
                             }
                         }
-                    if quota.id != manager.quotas.last?.id {
-                        Spacer(minLength: 0)
+                        .frame(height: 6)
+
+                        if let resetsAt = quota.resetsAt, resetsAt.timeIntervalSinceNow > 0 {
+                            Text("Resets \(resetsAt.formatted(date: .omitted, time: .shortened))")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
             }
 
-            // Reset countdown
-            GlassCard {
-                HStack(spacing: 8) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 11))
-                        .foregroundStyle(
-                            LinearGradient(colors: [.purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        )
-                    Text("Next reset")
+            // Reset timer
+            HStack(spacing: 6) {
+                Image(systemName: "clock")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+                Text("Next reset")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(manager.timeUntilReset)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                    .fill(Theme.muted)
+            )
+        }
+    }
+
+    // MARK: - Compact usage
+
+    private var compactUsageView: some View {
+        VStack(spacing: 4) {
+            ForEach(manager.quotas) { quota in
+                HStack(spacing: 6) {
+                    Text(quota.label)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text(manager.timeUntilReset)
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundStyle(
-                            LinearGradient(colors: [.primary, .primary.opacity(0.7)], startPoint: .leading, endPoint: .trailing)
-                        )
 
-                    if manager.refreshInterval != .off {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(.purple.opacity(0.5))
-                            .help("Auto-refresh: \(manager.refreshInterval.label)")
+                    // Mini bar
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Theme.muted)
+                            .frame(width: 44, height: 4)
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(quota.level.color)
+                            .frame(width: 44 * CGFloat(min(quota.utilization, 100) / 100), height: 4)
                     }
-                }
-            }
-        }
-    }
-
-    // MARK: - Usage (compact)
-
-    private var compactUsageView: some View {
-        VStack(spacing: 6) {
-            ForEach(manager.quotas) { quota in
-                HStack(spacing: 8) {
-                    Image(systemName: quota.icon)
-                        .font(.system(size: 9))
-                        .foregroundColor(quota.level.color.opacity(0.8))
-                        .frame(width: 14)
-                    Text(quota.label)
-                        .font(.system(size: 11))
-                        .lineLimit(1)
-                    Spacer()
-
-                    // Mini inline bar
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.primary.opacity(0.06))
-                        .frame(width: 40, height: 4)
-                        .overlay(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(quota.level.color)
-                                .frame(width: 40 * CGFloat(min(quota.utilization, 100) / 100))
-                        }
 
                     Text("\(Int(quota.utilization))%")
-                        .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(quota.level.color)
-                        .frame(width: 36, alignment: .trailing)
+                        .frame(width: 32, alignment: .trailing)
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, 3)
             }
 
-            Divider().opacity(0.2).padding(.vertical, 2)
+            SHDivider().padding(.vertical, 2)
 
-            HStack(spacing: 4) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary)
-                Text("Reset")
+            HStack {
+                Text("Next reset")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(manager.timeUntilReset)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundColor(.secondary)
             }
         }
     }
 
-    // MARK: - Stats view
+    // MARK: - Stats
 
     private var statsView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Cost summary cards
-            HStack(spacing: 8) {
-                StatCard(label: "Today", cost: manager.todayStats.totalCost, messages: manager.todayStats.totalMessages, icon: "sun.max.fill", accent: .orange)
-                StatCard(label: "7 days", cost: manager.weekStats.totalCost, messages: manager.weekStats.totalMessages, icon: "calendar", accent: .blue)
-                StatCard(label: "30 days", cost: manager.monthStats.totalCost, messages: manager.monthStats.totalMessages, icon: "calendar.badge.clock", accent: .purple)
+        VStack(spacing: 10) {
+            // Cost cards
+            HStack(spacing: 6) {
+                SHStatCard(label: "Today", value: formatCost(manager.todayStats.totalCost), sub: "\(manager.todayStats.totalMessages) msgs")
+                SHStatCard(label: "7 days", value: formatCost(manager.weekStats.totalCost), sub: "\(manager.weekStats.totalMessages) msgs")
+                SHStatCard(label: "30 days", value: formatCost(manager.monthStats.totalCost), sub: "\(manager.monthStats.totalMessages) msgs")
             }
 
-            // Sparkline chart
+            // Sparkline
             if manager.monthStats.daily.count >= 2 {
-                GlassCard {
+                SHCard {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("USAGE TREND")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(.secondary)
-                                .tracking(1)
+                            SHLabel("Usage Trend")
                             Spacer()
                             Text("7 days")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.secondary.opacity(0.6))
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
                         }
-
                         SparklineView(
                             data: Array(manager.monthStats.daily.prefix(7).reversed().map(\.cost))
                         )
-                        .frame(height: 48)
+                        .frame(height: 44)
                     }
                 }
             }
 
-            // Model breakdown
+            // Models
             if !manager.monthStats.byModel.isEmpty {
-                GlassCard {
+                SHCard {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("MODELS")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.secondary)
-                            .tracking(1)
-
+                        SHLabel("Models")
                         ForEach(manager.monthStats.byModel) { model in
-                            ModelRow(model: model, totalCost: manager.monthStats.totalCost)
-                        }
-                    }
-                }
-            }
-
-            // Daily history
-            if !manager.monthStats.daily.isEmpty {
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("DAILY HISTORY")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.secondary)
-                            .tracking(1)
-
-                        ForEach(manager.monthStats.daily.prefix(7)) { day in
-                            HStack(spacing: 8) {
-                                Text(day.dateLabel)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .frame(width: 65, alignment: .leading)
-                                DailyBar(cost: day.cost, maxCost: maxDailyCost)
-                                Text(formatCost(day.cost))
-                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                    .frame(width: 50, alignment: .trailing)
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(colorForModel(model.model))
+                                    .frame(width: 6, height: 6)
+                                Text(model.shortName)
+                                    .font(.system(size: 11, weight: .medium))
+                                Spacer()
+                                Text(formatTokens(model.tokens.totalTokens))
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                Text(formatCost(model.cost))
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .frame(width: 48, alignment: .trailing)
                             }
                         }
                     }
                 }
             }
 
-            // Action buttons
-            HStack(spacing: 8) {
-                PillButton(
+            // Daily
+            if !manager.monthStats.daily.isEmpty {
+                SHCard {
+                    VStack(alignment: .leading, spacing: 6) {
+                        SHLabel("Daily")
+                        ForEach(manager.monthStats.daily.prefix(7)) { day in
+                            HStack(spacing: 6) {
+                                Text(day.dateLabel)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 60, alignment: .leading)
+
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .fill(Theme.muted)
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .fill(Theme.accent.opacity(0.5))
+                                            .frame(width: max(0, geo.size.width * CGFloat(day.cost / maxDailyCost)))
+                                    }
+                                }
+                                .frame(height: 5)
+
+                                Text(formatCost(day.cost))
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .frame(width: 46, alignment: .trailing)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Actions
+            HStack(spacing: 6) {
+                SHButton(
                     label: copiedFeedback ? "Copied!" : "Copy",
                     icon: copiedFeedback ? "checkmark" : "doc.on.doc",
-                    style: copiedFeedback ? .success : .secondary
+                    style: copiedFeedback ? .success : .outline
                 ) {
                     if manager.copyStatsToClipboard() {
                         copiedFeedback = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            withAnimation { copiedFeedback = false }
+                            copiedFeedback = false
                         }
                     }
                 }
 
-                PillButton(label: "Export CSV", icon: "square.and.arrow.up", style: .secondary) {
+                SHButton(label: "Export CSV", icon: "square.and.arrow.up", style: .outline) {
                     manager.exportCSV()
                 }
 
@@ -518,17 +500,11 @@ struct MenuBarView: View {
     // MARK: - States
 
     private var loadingView: some View {
-        VStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .stroke(Color.purple.opacity(0.15), lineWidth: 3)
-                    .frame(width: 36, height: 36)
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(.purple)
-            }
-            Text("Fetching usage...")
-                .font(.system(size: 12, weight: .medium))
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Loading...")
+                .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
@@ -536,21 +512,15 @@ struct MenuBarView: View {
     }
 
     private func errorView(_ error: String) -> some View {
-        GlassCard {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(Color.orange.opacity(0.12))
-                        .frame(width: 36, height: 36)
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
-                        .font(.system(size: 16))
-                }
-                VStack(alignment: .leading, spacing: 3) {
+        SHCard {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.orange)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(error)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Text("Check settings for details")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("Check settings")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 }
@@ -560,71 +530,36 @@ struct MenuBarView: View {
     }
 
     private var emptyView: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.purple.opacity(0.08))
-                    .frame(width: 44, height: 44)
-                Image(systemName: "arrow.clockwise.circle")
-                    .font(.system(size: 22))
-                    .foregroundColor(.purple.opacity(0.5))
-            }
+        VStack(spacing: 8) {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundColor(.secondary)
             Text("Click Refresh to load data")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
     }
 
-    // MARK: - Bottom bar
+    // MARK: - Footer
 
     private var bottomBar: some View {
-        HStack(spacing: 10) {
-            Button(action: { manager.refresh() }) {
-                HStack(spacing: 5) {
-                    if manager.isLoading {
-                        ProgressView()
-                            .controlSize(.mini)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 10, weight: .bold))
-                            .rotationEffect(.degrees(manager.isLoading ? 360 : 0))
-                    }
-                    Text("Refresh")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(!manager.isAuthenticated || manager.isLoading
-                              ? Color.clear
-                              : Color.purple.opacity(0.12))
-                )
+        HStack(spacing: 8) {
+            SHButton(label: "Refresh", icon: manager.isLoading ? nil : "arrow.clockwise", style: .ghost, isLoading: manager.isLoading) {
+                manager.refresh()
             }
-            .buttonStyle(.plain)
-            .foregroundColor(manager.isLoading ? .secondary : .purple)
             .disabled(!manager.isAuthenticated || manager.isLoading)
 
             Spacer()
 
             Text("v\(UsageManager.currentVersion)")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .foregroundColor(.secondary.opacity(0.35))
+                .foregroundColor(.secondary.opacity(0.4))
 
-            Button(action: { NSApplication.shared.terminate(nil) }) {
-                Text("Quit")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.primary.opacity(0.04))
-                    )
+            SHButton(label: "Quit", style: .ghost) {
+                NSApplication.shared.terminate(nil)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -641,347 +576,238 @@ struct MenuBarView: View {
         if count >= 1_000 { return String(format: "%.1fK", Double(count) / 1_000) }
         return "\(count)"
     }
+
+    private func colorForModel(_ model: String) -> Color {
+        if model.contains("opus") { return Theme.accent }
+        if model.contains("sonnet") { return .blue }
+        if model.contains("haiku") { return .green }
+        return .gray
+    }
 }
 
-// MARK: - Glass Card
+// ============================================================
+// MARK: - shadcn-style components
+// ============================================================
 
-struct GlassCard<Content: View>: View {
+// MARK: Divider
+
+struct SHDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Theme.border)
+            .frame(height: 1)
+    }
+}
+
+// MARK: Card
+
+struct SHCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
         content
-            .padding(12)
+            .padding(10)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.primary.opacity(0.03))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-                    )
+                RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                    .strokeBorder(Theme.border, lineWidth: 1)
             )
     }
 }
 
-// MARK: - Tab Pill
+// MARK: Label
 
-struct TabPill: View {
+struct SHLabel: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(.primary.opacity(0.7))
+    }
+}
+
+// MARK: Badge
+
+struct SHBadge: View {
+    let text: String
+    var color: Color = .primary
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 5, height: 5)
+            Text(text)
+                .font(.system(size: 10, weight: .medium))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(
+            Capsule()
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+    }
+}
+
+// MARK: Tab
+
+struct SHTab: View {
     let label: String
-    let icon: String
     let isActive: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: 9, weight: .bold))
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .foregroundColor(isActive ? .purple : .secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isActive ? Color.purple.opacity(0.12) : Color.clear)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Icon Button
-
-struct IconButton: View {
-    let icon: String
-    var isActive: Bool = false
-    let action: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(isActive ? .purple : .secondary)
-                .frame(width: 28, height: 28)
+            Text(label)
+                .font(.system(size: 11, weight: isActive ? .semibold : .medium))
+                .foregroundColor(isActive ? .primary : .secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.primary.opacity(isHovered ? 0.1 : (isActive ? 0.08 : 0.04)))
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(isActive ? Color(nsColor: .controlBackgroundColor) : Color.clear)
+                        .shadow(color: isActive ? Color.black.opacity(0.06) : .clear, radius: 1, y: 1)
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.1)) { isHovered = hovering }
-        }
     }
 }
 
-// MARK: - Pill Button
+// MARK: Icon Button
 
-enum PillButtonStyle {
-    case primary, secondary, success
-}
-
-struct PillButton: View {
-    let label: String
-    var icon: String = ""
-    var style: PillButtonStyle = .primary
+struct SHIconButton: View {
+    let icon: String
     let action: () -> Void
     @State private var isHovered = false
 
-    private var fgColor: Color {
-        switch style {
-        case .primary: return .purple
-        case .secondary: return .secondary
-        case .success: return .green
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isHovered ? Theme.mutedHover : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(isHovered ? Theme.borderHover : Theme.border, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
+}
 
-    private var bgColor: Color {
-        switch style {
-        case .primary: return .purple.opacity(isHovered ? 0.18 : 0.1)
-        case .secondary: return Color.primary.opacity(isHovered ? 0.1 : 0.05)
-        case .success: return .green.opacity(isHovered ? 0.18 : 0.1)
-        }
-    }
+// MARK: Button
+
+enum SHButtonStyle {
+    case primary, outline, ghost, success
+}
+
+struct SHButton: View {
+    let label: String
+    var icon: String? = nil
+    var style: SHButtonStyle = .primary
+    var isLoading: Bool = false
+    let action: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                if !icon.isEmpty {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                }
+                if let icon {
                     Image(systemName: icon)
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 9, weight: .semibold))
                 }
                 Text(label)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .medium))
             }
-            .foregroundColor(fgColor)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .foregroundColor(foreground)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(bgColor)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(background)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(borderColor, lineWidth: style == .ghost ? 0 : 1)
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.1)) { isHovered = hovering }
+        .onHover { isHovered = $0 }
+    }
+
+    private var foreground: Color {
+        switch style {
+        case .primary: return .white
+        case .outline: return .primary
+        case .ghost: return .secondary
+        case .success: return .green
+        }
+    }
+
+    private var background: Color {
+        switch style {
+        case .primary: return isHovered ? Theme.accent.opacity(0.9) : Theme.accent
+        case .outline: return isHovered ? Theme.mutedHover : Color.clear
+        case .ghost: return isHovered ? Theme.mutedHover : Color.clear
+        case .success: return .green.opacity(0.08)
+        }
+    }
+
+    private var borderColor: Color {
+        switch style {
+        case .primary: return Theme.accent
+        case .outline: return isHovered ? Theme.borderHover : Theme.border
+        case .ghost: return .clear
+        case .success: return .green.opacity(0.2)
         }
     }
 }
 
-// MARK: - Settings section wrapper
+// MARK: Stat Card
 
-struct SettingsSection<Content: View>: View {
-    let title: String
-    var icon: String = ""
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 5) {
-                if !icon.isEmpty {
-                    Image(systemName: icon)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.purple.opacity(0.7))
-                }
-                Text(title.uppercased())
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.secondary)
-                    .tracking(1)
-            }
-            content
-        }
-    }
-}
-
-// MARK: - Circular Gauge
-
-struct CircularGauge: View {
-    let quota: UsageQuota
-    var isHovered: Bool = false
-
-    private let lineWidth: CGFloat = 5
-    private var progress: Double { min(quota.utilization / 100, 1.0) }
-
-    var body: some View {
-        VStack(spacing: 6) {
-            ZStack {
-                // Track
-                Circle()
-                    .stroke(Color.primary.opacity(0.06), lineWidth: lineWidth)
-                    .frame(width: 52, height: 52)
-
-                // Progress arc
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(
-                        AngularGradient(
-                            colors: [quota.level.color.opacity(0.5), quota.level.color],
-                            center: .center,
-                            startAngle: .degrees(0),
-                            endAngle: .degrees(360 * progress)
-                        ),
-                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-                    )
-                    .frame(width: 52, height: 52)
-                    .rotationEffect(.degrees(-90))
-                    .shadow(color: quota.level.color.opacity(0.3), radius: isHovered ? 6 : 2)
-                    .animation(.spring(response: 0.8, dampingFraction: 0.7), value: progress)
-
-                // Percentage text
-                Text("\(Int(quota.utilization))")
-                    .font(.system(size: 15, weight: .black, design: .rounded))
-                    .foregroundColor(quota.level.color)
-                + Text("%")
-                    .font(.system(size: 8, weight: .bold, design: .rounded))
-                    .foregroundColor(quota.level.color.opacity(0.7))
-            }
-            .scaleEffect(isHovered ? 1.08 : 1.0)
-
-            VStack(spacing: 1) {
-                Image(systemName: quota.icon)
-                    .font(.system(size: 8))
-                    .foregroundColor(.secondary)
-                Text(quota.label)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-// MARK: - Stat Card (enhanced cost card)
-
-struct StatCard: View {
+struct SHStatCard: View {
     let label: String
-    let cost: Double
-    let messages: Int
-    var icon: String = ""
-    var accent: Color = .purple
-    @State private var isHovered = false
+    let value: String
+    var sub: String = ""
 
     var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 10))
-                .foregroundColor(accent.opacity(0.6))
-
-            Text(cost >= 1 ? String(format: "$%.2f", cost) : String(format: "$%.3f", cost))
-                .font(.system(size: 15, weight: .black, design: .rounded))
-                .foregroundColor(.primary)
-
-            VStack(spacing: 1) {
-                Text(label)
-                    .font(.system(size: 9, weight: .semibold))
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+            if !sub.isEmpty {
+                Text(sub)
+                    .font(.system(size: 9))
                     .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-                Text("\(messages) msgs")
-                    .font(.system(size: 8, weight: .medium))
-                    .foregroundColor(.secondary.opacity(0.6))
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(isHovered ? 0.06 : 0.03))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(accent.opacity(isHovered ? 0.15 : 0.05), lineWidth: 0.5)
-                )
+            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
         )
-        .scaleEffect(isHovered ? 1.02 : 1.0)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) { isHovered = hovering }
-        }
     }
 }
 
-// MARK: - Model Row
-
-struct ModelRow: View {
-    let model: ModelUsage
-    let totalCost: Double
-
-    private var fraction: Double {
-        guard totalCost > 0 else { return 0 }
-        return model.cost / totalCost
-    }
-
-    private var color: Color {
-        if model.model.contains("opus") { return .purple }
-        if model.model.contains("sonnet") { return .blue }
-        if model.model.contains("haiku") { return .green }
-        return .gray
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(color)
-                .frame(width: 3, height: 18)
-
-            Text(model.shortName)
-                .font(.system(size: 11, weight: .semibold))
-
-            // Proportion bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.primary.opacity(0.04))
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(color.opacity(0.4))
-                        .frame(width: max(0, geo.size.width * CGFloat(fraction)))
-                }
-            }
-            .frame(height: 4)
-
-            Text(model.cost >= 0.01 ? String(format: "$%.2f", model.cost) : String(format: "$%.3f", model.cost))
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .frame(width: 50, alignment: .trailing)
-        }
-    }
-}
-
-// MARK: - Daily bar component
-
-struct DailyBar: View {
-    let cost: Double
-    let maxCost: Double
-
-    private var fraction: Double {
-        guard maxCost > 0 else { return 0 }
-        return cost / maxCost
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color.primary.opacity(0.04))
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(
-                        LinearGradient(
-                            colors: [.purple.opacity(0.5), .purple.opacity(0.8)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: max(0, geo.size.width * CGFloat(fraction)))
-            }
-        }
-        .frame(height: 6)
-    }
-}
-
-// MARK: - Sparkline component
+// MARK: - Sparkline
 
 struct SparklineView: View {
     let data: [Double]
@@ -1000,7 +826,7 @@ struct SparklineView: View {
 
             ZStack {
                 if points.count >= 2 {
-                    // Gradient fill
+                    // Fill
                     Path { path in
                         path.move(to: CGPoint(x: points[0].x, y: geo.size.height))
                         path.addLine(to: points[0])
@@ -1015,15 +841,9 @@ struct SparklineView: View {
                         path.addLine(to: CGPoint(x: points.last!.x, y: geo.size.height))
                         path.closeSubpath()
                     }
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.purple.opacity(0.2), Color.purple.opacity(0.01)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                    .fill(Theme.accentMuted)
 
-                    // Smooth curve
+                    // Line
                     Path { path in
                         path.move(to: points[0])
                         for i in 1..<points.count {
@@ -1035,23 +855,15 @@ struct SparklineView: View {
                                           control2: CGPoint(x: midX, y: curr.y))
                         }
                     }
-                    .stroke(
-                        LinearGradient(colors: [.purple.opacity(0.6), .purple], startPoint: .leading, endPoint: .trailing),
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
-                    )
+                    .stroke(Theme.accent.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                 }
 
-                // End dot (latest)
+                // End dot
                 if let last = points.last {
-                    ZStack {
-                        Circle()
-                            .fill(Color.purple.opacity(0.2))
-                            .frame(width: 10, height: 10)
-                        Circle()
-                            .fill(Color.purple)
-                            .frame(width: 5, height: 5)
-                    }
-                    .position(last)
+                    Circle()
+                        .fill(Theme.accent)
+                        .frame(width: 4, height: 4)
+                        .position(last)
                 }
             }
         }

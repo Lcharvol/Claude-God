@@ -164,9 +164,9 @@ class UsageManager: ObservableObject {
 
     // MARK: - Propriétés calculées
 
-    /// Le quota le plus "urgent" (le plus utilisé) pour afficher dans la menu bar
+    /// Toujours afficher le quota session (5h) dans la menu bar
     var primaryQuota: UsageQuota? {
-        quotas.max(by: { $0.utilization < $1.utilization })
+        quotas.first(where: { $0.label.contains("Session") }) ?? quotas.first
     }
 
     var menuBarTitle: String {

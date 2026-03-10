@@ -3,21 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude God — Your Claude usage, always visible</title>
-    <meta name="description" content="A tiny macOS menu bar app that shows your Claude usage quotas at a glance. Works with Pro & Max plans — no API credits needed.">
+    <title>Claude God — Monitor Claude AI Usage in Your macOS Menu Bar</title>
+    <meta name="description" content="Free macOS menu bar app to monitor your Claude AI usage quotas, session limits, and costs in real time. Works with Claude Pro & Max plans. Open source, native SwiftUI, no API credits needed.">
+    <meta name="keywords" content="Claude, Claude AI, Claude Code, Anthropic, macOS, menu bar, usage monitor, rate limits, quota tracker, Claude Pro, Claude Max, SwiftUI, open source">
+    <meta name="author" content="Lucas Charvolin">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#9444f0">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Claude God">
-    <meta property="og:description" content="Your Claude usage quotas, always visible in the menu bar. Works with Pro & Max — no API credits needed.">
+    <meta property="og:title" content="Claude God — Monitor Claude AI Usage in Your Menu Bar">
+    <meta property="og:description" content="Free macOS app to track your Claude AI quotas, session limits, costs, and model usage. Works with Pro & Max — no API credits needed.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://claudegod.app">
+    <meta property="og:site_name" content="Claude God">
+    <meta property="og:locale" content="en_US">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Claude God">
-    <meta name="twitter:description" content="Your Claude usage quotas, always visible in the menu bar. Works with Pro & Max — no API credits needed.">
+    <meta name="twitter:title" content="Claude God — Monitor Claude AI Usage in Your Menu Bar">
+    <meta name="twitter:description" content="Free macOS app to track your Claude AI quotas, session limits, costs, and model usage. Works with Pro & Max — no API credits needed.">
 
     <link rel="canonical" href="https://claudegod.app">
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Claude God",
+        "description": "A free macOS menu bar app that monitors your Claude AI usage quotas, session limits, and costs in real time.",
+        "url": "https://claudegod.app",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS 13+",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        },
+        "author": {
+            "@type": "Person",
+            "name": "Lucas Charvolin",
+            "url": "https://github.com/Lcharvol"
+        },
+        "license": "https://opensource.org/licenses/MIT",
+        "downloadUrl": "https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg",
+        "softwareVersion": "2.1.0",
+        "programmingLanguage": "Swift"
+    }
+    </script>
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%239444f0'/><stop offset='100%25' stop-color='%235938f2'/></linearGradient></defs><rect width='32' height='32' rx='8' fill='url(%23g)'/><text x='16' y='22.5' text-anchor='middle' font-family='system-ui,-apple-system,sans-serif' font-size='18' font-weight='800' fill='white'>C</text></svg>">
@@ -900,13 +933,13 @@
         }
     </style>
 </head>
-<body>
+<body itemscope itemtype="https://schema.org/WebPage">
 
 <!-- NAV -->
 <nav id="nav">
     <div class="nav-inner">
-        <a href="/" class="nav-logo">
-            <div class="nav-logo-icon">C</div>
+        <a href="/" class="nav-logo" aria-label="Claude God - Home">
+            <div class="nav-logo-icon" aria-hidden="true">C</div>
             Claude God
         </a>
         <div class="nav-links">
@@ -918,8 +951,9 @@
     </div>
 </nav>
 
+<main>
 <!-- HERO -->
-<section class="hero">
+<section class="hero" aria-label="Introduction">
     <div class="hero-glow">
         <div class="orb orb-1"></div>
         <div class="orb orb-2"></div>
@@ -955,7 +989,7 @@
         </div>
 
         <p class="hero-note">
-            <strong>390 lines of Swift.</strong> No Electron. No dependencies. Just native macOS.
+            <strong>Pure SwiftUI.</strong> No Electron. No dependencies. Just native macOS. Free &amp; open source.
         </p>
     </div>
 
@@ -1163,16 +1197,18 @@
     </div>
 </section>
 
+</main>
+
 <!-- FOOTER -->
 <footer>
     <div class="footer-links">
         <a href="https://github.com/Lcharvol/Claude-God">GitHub</a>
         <a href="https://github.com/Lcharvol/Claude-God/releases">Releases</a>
-        <a href="https://console.anthropic.com/" target="_blank">Get API Key</a>
+        <a href="https://github.com/Lcharvol/Claude-God/blob/main/CHANGELOG.md">Changelog</a>
     </div>
     <p class="footer-copy">
         Built with SwiftUI by <a href="https://github.com/Lcharvol">Lucas Charvolin</a>.
-        Open source under MIT.
+        Open source under MIT. Not affiliated with Anthropic.
     </p>
 </footer>
 

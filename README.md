@@ -1,6 +1,6 @@
 # Claude God
 
-A lightweight macOS menu bar app that monitors your Anthropic API rate limits in real time.
+A lightweight macOS menu bar app that monitors your Claude usage quotas in real time. Works with **Pro** and **Max** plans — no API credits needed.
 
 [![CI](https://github.com/Lcharvol/Claude-God/actions/workflows/ci.yml/badge.svg)](https://github.com/Lcharvol/Claude-God/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Lcharvol/Claude-God)](https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg)
@@ -18,32 +18,46 @@ A lightweight macOS menu bar app that monitors your Anthropic API rate limits in
    xattr -cr /Applications/Claude\ God.app
    ```
    *(required once because the app is not notarized)*
-3. Launch it — a `C` icon appears in the menu bar
-4. Click the icon, paste your [Anthropic API key](https://console.anthropic.com/), hit Save
+3. Make sure you're logged in to Claude Code:
+   ```bash
+   claude login
+   ```
+4. Launch the app — a `C` icon appears in the menu bar
 
 ## Features
 
+- **No API key needed** — uses your existing `claude login` credentials
+- **Works with Pro & Max** — detects your subscription type automatically
+- **Multiple quotas** — session (5h), weekly (7d), per-model (Sonnet, Opus)
 - **Menu bar native** — always visible, no dock icon, no window
 - **Auto-refresh** — configurable interval (1, 2, 5, 10 min or off)
-- **Live countdown** — see exactly when rate limits reset
+- **Live countdown** — see exactly when quotas reset
 - **Color-coded bars** — green/orange/red at a glance
-- **Notifications** — alert when tokens drop below a configurable threshold
-- **Keychain storage** — API key encrypted by macOS, not plain text
+- **Notifications** — alert when usage gets high
 - **Launch at login** — start automatically with your Mac
-- **Near-zero cost** — each refresh uses 1 Haiku token (~$0.00001)
+- **Completely free** — no API credits, no billing, zero cost
 - **Fully private** — no server, no telemetry, no tracking
 
 ## How it works
 
-The app sends a minimal API request (1 token) and reads the rate limit headers Anthropic returns:
+The app reads your OAuth credentials from `claude login` (stored in macOS Keychain or `~/.claude/.credentials.json`) and calls Anthropic's usage API:
 
-| Header | Info |
+```
+GET https://api.anthropic.com/api/oauth/usage
+Authorization: Bearer <oauth_token>
+anthropic-beta: oauth-2025-04-20
+```
+
+This returns your quota utilization for each window:
+
+| Field | Info |
 |---|---|
-| `anthropic-ratelimit-tokens-limit` | Max tokens per window |
-| `anthropic-ratelimit-tokens-remaining` | Tokens left |
-| `anthropic-ratelimit-tokens-reset` | When the limit resets |
-| `anthropic-ratelimit-requests-limit` | Max requests per window |
-| `anthropic-ratelimit-requests-remaining` | Requests left |
+| `five_hour.utilization` | Session usage (resets every 5h) |
+| `seven_day.utilization` | Weekly usage (all models) |
+| `seven_day_sonnet.utilization` | Sonnet-specific weekly usage |
+| `seven_day_opus.utilization` | Opus-specific weekly usage |
+
+OAuth tokens are automatically refreshed when they expire.
 
 ## Build from source
 
@@ -64,9 +78,9 @@ See the [Makefile](Makefile) for all commands: `make build`, `make run`, `make d
 Claude-God/
 ├── Sources/
 │   ├── ClaudeUsageApp.swift       # App entry point, MenuBarExtra
-│   ├── UsageManager.swift         # API calls, auto-refresh, notifications
-│   ├── MenuBarView.swift          # UI: settings, usage bars, controls
-│   ├── KeychainHelper.swift       # Secure API key storage
+│   ├── UsageManager.swift         # OAuth API, auto-refresh, notifications
+│   ├── MenuBarView.swift          # UI: quotas, settings, controls
+│   ├── KeychainHelper.swift       # Keychain utilities
 │   └── ClaudeGod.entitlements     # Network permissions
 ├── docs/
 │   ├── index.html                 # Landing page (claudegod.app)
@@ -90,13 +104,13 @@ Claude-God/
 Push a tag and GitHub Actions builds the `.dmg` automatically:
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
 ## Roadmap
 
-- [ ] Track multiple models (different rate limits per model)
+- [x] Track multiple models (different quotas per model)
 - [ ] Usage history graph
 - [ ] Global keyboard shortcut to open popover
 - [ ] Homebrew cask distribution

@@ -440,7 +440,7 @@ struct QuotaBar: View {
                         .font(.system(size: 12, weight: .semibold))
                 }
                 Spacer()
-                Text("\(Int(quota.percentRemaining))%")
+                Text("\(Int(quota.utilization))%")
                     .font(.system(size: 14, weight: .heavy, design: .monospaced))
                     .foregroundColor(quota.level.color)
             }
@@ -458,9 +458,9 @@ struct QuotaBar: View {
                                 endPoint: .trailing
                             )
                         )
-                        .frame(width: max(0, geo.size.width * CGFloat(quota.percentRemaining / 100)))
+                        .frame(width: max(0, geo.size.width * CGFloat(quota.utilization / 100)))
                         .shadow(color: quota.level.color.opacity(0.3), radius: 3, y: 1)
-                        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: quota.percentRemaining)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: quota.utilization)
                 }
             }
             .frame(height: 8)

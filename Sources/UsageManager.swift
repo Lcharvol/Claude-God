@@ -34,10 +34,10 @@ enum RefreshInterval: Int, CaseIterable, Identifiable {
 enum UsageLevel {
     case good, warning, critical
 
-    /// percent = pourcentage RESTANT (100 - utilization)
-    init(percent: Double) {
-        if percent > 50 { self = .good }
-        else if percent > 20 { self = .warning }
+    /// utilization = pourcentage UTILISÉ (0-100)
+    init(utilization: Double) {
+        if utilization < 50 { self = .good }
+        else if utilization < 80 { self = .warning }
         else { self = .critical }
     }
 
@@ -59,8 +59,7 @@ struct UsageQuota: Identifiable {
     let utilization: Double      // 0-100, pourcentage UTILISÉ
     let resetsAt: Date?
 
-    var percentRemaining: Double { max(0, 100 - utilization) }
-    var level: UsageLevel { UsageLevel(percent: percentRemaining) }
+    var level: UsageLevel { UsageLevel(utilization: utilization) }
 }
 
 // MARK: - Credential source
@@ -154,12 +153,12 @@ class UsageManager: ObservableObject {
 
     /// Le quota le plus "urgent" (le plus utilisé) pour afficher dans la menu bar
     var primaryQuota: UsageQuota? {
-        quotas.min(by: { $0.percentRemaining < $1.percentRemaining })
+        quotas.max(by: { $0.utilization < $1.utilization })
     }
 
     var menuBarTitle: String {
         guard let q = primaryQuota else { return "—" }
-        return "\(Int(q.percentRemaining))%"
+        return "\(Int(q.utilization))%"
     }
 
     /// Le prochain reset parmi tous les quotas
@@ -570,7 +569,8 @@ class UsageManager: ObservableObject {
 
     private func checkLowUsageNotification() {
         guard notificationsEnabled, let primary = primaryQuota else { return }
-        guard primary.percentRemaining <= notificationThreshold else {
+        let threshold = 100 - notificationThreshold  // notificationThreshold is "remaining %", convert to utilization
+        guard primary.utilization >= threshold else {
             hasNotifiedLowUsage = false
             return
         }
@@ -580,7 +580,7 @@ class UsageManager: ObservableObject {
 
         let content = UNMutableNotificationContent()
         content.title = "Claude God"
-        content.body = "\(primary.label): \(Int(primary.percentRemaining))% remaining"
+        content.body = "\(primary.label): \(Int(primary.utilization))% used"
         content.sound = .default
 
         let request = UNNotificationRequest(

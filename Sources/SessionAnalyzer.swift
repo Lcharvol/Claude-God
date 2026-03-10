@@ -13,23 +13,52 @@ enum ModelPricing {
         let cacheRead: Double
     }
 
+    // Pricing as of 2025 — covers Claude 3.x, 3.5, and 4.x families
+    // Model strings use contains() matching so "opus" matches both claude-3-opus and claude-opus-4
     static func price(for model: String) -> Price {
-        // https://docs.anthropic.com/en/docs/about-claude/models
-        if model.contains("opus") {
+        let m = model.lowercased()
+        if m.contains("opus") {
             return Price(input: 15.0 / 1_000_000, output: 75.0 / 1_000_000,
                          cacheCreation: 18.75 / 1_000_000, cacheRead: 1.50 / 1_000_000)
         }
-        if model.contains("sonnet") {
+        if m.contains("sonnet") {
             return Price(input: 3.0 / 1_000_000, output: 15.0 / 1_000_000,
                          cacheCreation: 3.75 / 1_000_000, cacheRead: 0.30 / 1_000_000)
         }
-        if model.contains("haiku") {
+        if m.contains("haiku") {
             return Price(input: 0.80 / 1_000_000, output: 4.0 / 1_000_000,
                          cacheCreation: 1.0 / 1_000_000, cacheRead: 0.08 / 1_000_000)
         }
-        // Default to Sonnet pricing
+        // Default to Sonnet pricing for unknown models
         return Price(input: 3.0 / 1_000_000, output: 15.0 / 1_000_000,
                      cacheCreation: 3.75 / 1_000_000, cacheRead: 0.30 / 1_000_000)
+    }
+}
+
+// MARK: - JSONL Codable models
+
+private struct JSONLEntry: Decodable {
+    let type: String?
+    let timestamp: String?
+    let message: JSONLMessage?
+}
+
+private struct JSONLMessage: Decodable {
+    let model: String?
+    let usage: JSONLUsage?
+}
+
+private struct JSONLUsage: Decodable {
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let cacheCreationInputTokens: Int?
+    let cacheReadInputTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case cacheCreationInputTokens = "cache_creation_input_tokens"
+        case cacheReadInputTokens = "cache_read_input_tokens"
     }
 }
 
@@ -58,9 +87,10 @@ struct ModelUsage: Identifiable {
     var cost: Double
 
     var shortName: String {
-        if model.contains("opus") { return "Opus" }
-        if model.contains("sonnet") { return "Sonnet" }
-        if model.contains("haiku") { return "Haiku" }
+        let m = model.lowercased()
+        if m.contains("opus") { return "Opus" }
+        if m.contains("sonnet") { return "Sonnet" }
+        if m.contains("haiku") { return "Haiku" }
         return model
     }
 }
@@ -76,9 +106,7 @@ struct DailyUsage: Identifiable {
         let cal = Calendar.current
         if cal.isDateInToday(date) { return "Today" }
         if cal.isDateInYesterday(date) { return "Yesterday" }
-        let f = DateFormatter()
-        f.dateFormat = "MMM d"
-        return f.string(from: date)
+        return SessionAnalyzer.dayLabelFormatter.string(from: date)
     }
 }
 
@@ -93,6 +121,35 @@ struct UsageStats {
 // MARK: - Analyzer
 
 class SessionAnalyzer {
+
+    // Static formatters (avoid recreating per call)
+    static let dayLabelFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
+    private static let dayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let isoFormatterNoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    private static let jsonDecoder: JSONDecoder = {
+        JSONDecoder()
+    }()
 
     private static let projectsDir: URL = {
         FileManager.default.homeDirectoryForCurrentUser
@@ -114,14 +171,6 @@ class SessionAnalyzer {
         var totalMessages = 0
 
         let cal = Calendar.current
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        let isoFormatterNoFrac = ISO8601DateFormatter()
-        isoFormatterNoFrac.formatOptions = [.withInternetDateTime]
 
         for projectDir in projectDirs {
             guard let files = try? fm.contentsOfDirectory(at: projectDir, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }
@@ -134,36 +183,38 @@ class SessionAnalyzer {
                     continue
                 }
 
-                guard let data = try? Data(contentsOf: file) else { continue }
-                guard let content = String(data: data, encoding: .utf8) else { continue }
+                guard let data = try? Data(contentsOf: file),
+                      let content = String(data: data, encoding: .utf8)
+                else { continue }
 
-                for line in content.components(separatedBy: .newlines) {
+                // Use enumerateLines for memory-efficient line-by-line processing
+                content.enumerateLines { line, _ in
                     guard !line.isEmpty,
                           let lineData = line.data(using: .utf8),
-                          let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any]
-                    else { continue }
+                          let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData)
+                    else { return }
 
-                    guard json["type"] as? String == "assistant",
-                          let message = json["message"] as? [String: Any],
-                          let usage = message["usage"] as? [String: Any],
-                          let model = message["model"] as? String,
+                    guard entry.type == "assistant",
+                          let message = entry.message,
+                          let usage = message.usage,
+                          let model = message.model,
                           model != "<synthetic>"
-                    else { continue }
+                    else { return }
 
                     // Parse timestamp
-                    guard let timestampStr = json["timestamp"] as? String,
+                    guard let timestampStr = entry.timestamp,
                           let timestamp = isoFormatter.date(from: timestampStr)
                               ?? isoFormatterNoFrac.date(from: timestampStr)
-                    else { continue }
+                    else { return }
 
                     // Filter by date range
-                    guard timestamp >= since, timestamp <= until else { continue }
+                    guard timestamp >= since, timestamp <= until else { return }
 
                     // Parse token counts
-                    let inputTokens = usage["input_tokens"] as? Int ?? 0
-                    let outputTokens = usage["output_tokens"] as? Int ?? 0
-                    let cacheCreation = usage["cache_creation_input_tokens"] as? Int ?? 0
-                    let cacheRead = usage["cache_read_input_tokens"] as? Int ?? 0
+                    let inputTokens = usage.inputTokens ?? 0
+                    let outputTokens = usage.outputTokens ?? 0
+                    let cacheCreation = usage.cacheCreationInputTokens ?? 0
+                    let cacheRead = usage.cacheReadInputTokens ?? 0
 
                     let tokens = TokenUsage(
                         inputTokens: inputTokens,
@@ -186,7 +237,7 @@ class SessionAnalyzer {
                     modelAgg[model] = existing
 
                     // Aggregate by day
-                    let dayKey = dateFormatter.string(from: timestamp)
+                    let dayKey = dayKeyFormatter.string(from: timestamp)
                     let dayStart = cal.startOfDay(for: timestamp)
                     var dayExisting = dailyAgg[dayKey] ?? (date: dayStart, tokens: TokenUsage(), cost: 0, count: 0)
                     dayExisting.tokens.add(tokens)

@@ -20,8 +20,13 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Verify Info.plist after xcodegen
+        run: cat Sources/Info.plist
+
       - name: Build app
         run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "Building version: $VERSION"
           xcodebuild \
             -project ClaudeGod.xcodeproj \
             -scheme ClaudeGod \
@@ -29,7 +34,9 @@ jobs:
             -derivedDataPath build \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}"
 
       - name: Create DMG
         run: |

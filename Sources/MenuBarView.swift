@@ -159,7 +159,7 @@ struct MenuBarView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Update available")
                     .font(.system(size: 11, weight: .medium))
-                Text("v\(UsageManager.currentVersion) → v\(manager.latestVersion)")
+                Text("v\(UpdateChecker.currentVersion) → v\(manager.latestVersion)")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(.secondary)
             }
@@ -379,6 +379,18 @@ struct MenuBarView: View {
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundColor(.secondary)
             }
+
+            if let lastRefresh = manager.lastRefresh {
+                HStack {
+                    Text("Updated")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(lastRefresh.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
         }
     }
 
@@ -550,10 +562,11 @@ struct MenuBarView: View {
                 manager.refresh()
             }
             .disabled(!manager.isAuthenticated || manager.isLoading)
+            .keyboardShortcut("r", modifiers: .command)
 
             Spacer()
 
-            Text("v\(UsageManager.currentVersion)")
+            Text("v\(UpdateChecker.currentVersion)")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(.secondary.opacity(0.4))
 
@@ -566,7 +579,6 @@ struct MenuBarView: View {
     // MARK: - Helpers
 
     private func formatCost(_ cost: Double) -> String {
-        if cost >= 1 { return String(format: "$%.2f", cost) }
         if cost >= 0.01 { return String(format: "$%.2f", cost) }
         return String(format: "$%.3f", cost)
     }

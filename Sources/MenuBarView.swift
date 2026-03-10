@@ -20,6 +20,7 @@ struct MenuBarView: View {
             }
 
             Divider()
+                .opacity(0.5)
 
             Group {
                 if manager.apiKey.isEmpty || manager.showSettings {
@@ -35,52 +36,66 @@ struct MenuBarView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 14)
 
             Divider()
+                .opacity(0.5)
 
             bottomBar
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
         }
-        .frame(width: 320)
+        .frame(width: 340)
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             ZStack {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(
                         LinearGradient(
-                            colors: [.purple, .indigo],
+                            colors: [
+                                Color(red: 0.58, green: 0.29, blue: 0.98),
+                                Color(red: 0.35, green: 0.22, blue: 0.95)
+                            ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 24, height: 24)
+                    .frame(width: 26, height: 26)
+                    .shadow(color: .purple.opacity(0.3), radius: 4, y: 2)
                 Text("C")
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(.system(size: 14, weight: .heavy))
                     .foregroundColor(.white)
             }
 
             Text("Claude God")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .bold))
 
             Spacer()
 
             if let lastRefresh = manager.lastRefresh, !manager.showSettings {
-                Text(lastRefresh.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 5, height: 5)
+                    Text(lastRefresh.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
             }
 
             Button(action: { manager.showSettings.toggle() }) {
-                Image(systemName: manager.showSettings ? "xmark" : "gearshape")
+                Image(systemName: manager.showSettings ? "xmark" : "gearshape.fill")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.secondary)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.primary.opacity(manager.showSettings ? 0.08 : 0.04))
+                    )
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -90,11 +105,16 @@ struct MenuBarView: View {
     // MARK: - Update banner
 
     private var updateBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "arrow.down.circle.fill")
-                .foregroundColor(.purple)
-                .font(.system(size: 14))
-            VStack(alignment: .leading, spacing: 1) {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(Color.purple.opacity(0.15))
+                    .frame(width: 28, height: 28)
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundColor(.purple)
+                    .font(.system(size: 16))
+            }
+            VStack(alignment: .leading, spacing: 2) {
                 Text("v\(manager.latestVersion) available")
                     .font(.system(size: 11, weight: .semibold))
                 Text("v\(UsageManager.currentVersion) installed")
@@ -110,25 +130,37 @@ struct MenuBarView: View {
             .controlSize(.small)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.purple.opacity(0.08))
+        .padding(.vertical, 10)
+        .background(
+            LinearGradient(
+                colors: [Color.purple.opacity(0.08), Color.purple.opacity(0.03)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
     }
 
     // MARK: - Settings
 
     private var settingsView: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SettingsSection(title: "API Key") {
-                VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 16) {
+            SettingsSection(title: "API Key", icon: "key.fill") {
+                VStack(alignment: .leading, spacing: 8) {
                     SecureField("sk-ant-api03-...", text: $manager.apiKey)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12, design: .monospaced))
 
                     HStack(spacing: 8) {
-                        Button("Save") {
+                        Button(action: {
                             manager.saveAPIKey()
                             manager.showSettings = false
                             manager.refresh()
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 9, weight: .bold))
+                                Text("Save")
+                            }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.purple)
@@ -144,26 +176,21 @@ struct MenuBarView: View {
 
                         Spacer()
 
-                        if manager.apiKeySource != .manual {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 10))
-                                .foregroundColor(.purple)
-                            Text("Auto-detected")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                        } else {
-                            Image(systemName: "lock.shield.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(.green)
-                            Text("Keychain")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                        Group {
+                            if manager.apiKeySource != .manual {
+                                Label("Auto-detected", systemImage: "sparkles")
+                                    .foregroundColor(.purple)
+                            } else {
+                                Label("Keychain", systemImage: "lock.shield.fill")
+                                    .foregroundColor(.green)
+                            }
                         }
+                        .font(.system(size: 10))
                     }
                 }
             }
 
-            SettingsSection(title: "Auto-refresh") {
+            SettingsSection(title: "Auto-refresh", icon: "arrow.triangle.2.circlepath") {
                 Picker("Interval", selection: $manager.refreshInterval) {
                     ForEach(RefreshInterval.allCases) { interval in
                         Text(interval.label).tag(interval)
@@ -173,12 +200,13 @@ struct MenuBarView: View {
                 .pickerStyle(.segmented)
             }
 
-            SettingsSection(title: "Notifications") {
-                VStack(alignment: .leading, spacing: 6) {
+            SettingsSection(title: "Notifications", icon: "bell.fill") {
+                VStack(alignment: .leading, spacing: 8) {
                     Toggle("Alert when tokens are low", isOn: $manager.notificationsEnabled)
                         .font(.system(size: 12))
                         .toggleStyle(.switch)
                         .controlSize(.small)
+                        .tint(.purple)
 
                     if manager.notificationsEnabled {
                         HStack(spacing: 8) {
@@ -187,8 +215,9 @@ struct MenuBarView: View {
                                 .foregroundColor(.secondary)
                             Slider(value: $manager.notificationThreshold, in: 5...50, step: 5)
                                 .controlSize(.small)
+                                .tint(.purple)
                             Text("\(Int(manager.notificationThreshold))%")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
                                 .foregroundColor(.secondary)
                                 .frame(width: 32, alignment: .trailing)
                         }
@@ -196,11 +225,12 @@ struct MenuBarView: View {
                 }
             }
 
-            SettingsSection(title: "System") {
+            SettingsSection(title: "System", icon: "laptopcomputer") {
                 Toggle("Launch at login", isOn: $manager.launchAtLogin)
                     .font(.system(size: 12))
                     .toggleStyle(.switch)
                     .controlSize(.small)
+                    .tint(.purple)
             }
         }
     }
@@ -208,9 +238,10 @@ struct MenuBarView: View {
     // MARK: - Usage
 
     private var usageView: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             UsageBar(
                 label: "Tokens",
+                icon: "text.word.spacing",
                 remaining: manager.tokensRemaining,
                 limit: manager.tokensLimit,
                 percent: manager.tokensPercent,
@@ -219,57 +250,69 @@ struct MenuBarView: View {
 
             UsageBar(
                 label: "Requests",
+                icon: "arrow.up.arrow.down",
                 remaining: manager.requestsRemaining,
                 limit: manager.requestsLimit,
                 percent: manager.requestsPercent,
                 level: manager.requestsLevel
             )
 
-            Divider()
-
-            HStack(spacing: 6) {
+            // Reset countdown card
+            HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 12))
+                    .foregroundColor(.purple.opacity(0.8))
                 Text("Reset in")
-                    .font(.system(size: 11))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(manager.timeUntilReset)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
 
                 if manager.refreshInterval != .off {
                     Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 8))
-                        .foregroundColor(.purple.opacity(0.7))
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.purple.opacity(0.6))
                         .help("Auto-refresh: \(manager.refreshInterval.label)")
                 }
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.primary.opacity(0.03))
+            )
         }
     }
 
     // MARK: - States
 
     private var loadingView: some View {
-        HStack(spacing: 8) {
+        VStack(spacing: 10) {
             ProgressView()
                 .controlSize(.small)
-            Text("Loading...")
+                .tint(.purple)
+            Text("Fetching rate limits...")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
+        .padding(.vertical, 20)
     }
 
     private func errorView(_ error: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.orange)
-                .font(.system(size: 14))
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(Color.orange.opacity(0.12))
+                    .frame(width: 32, height: 32)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                    .font(.system(size: 14))
+            }
+            VStack(alignment: .leading, spacing: 3) {
                 Text(error)
-                    .font(.system(size: 12))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.primary)
                 Text("Check your API key in settings")
                     .font(.system(size: 10))
@@ -277,15 +320,24 @@ struct MenuBarView: View {
             }
             Spacer()
         }
-        .padding(.vertical, 4)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.orange.opacity(0.06))
+        )
     }
 
     private var emptyView: some View {
-        Text("Click Refresh to load data")
-            .font(.system(size: 12))
-            .foregroundColor(.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
+        VStack(spacing: 8) {
+            Image(systemName: "arrow.clockwise.circle")
+                .font(.system(size: 20))
+                .foregroundColor(.secondary.opacity(0.5))
+            Text("Click Refresh to load data")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
     }
 
     // MARK: - Bottom bar
@@ -293,17 +345,25 @@ struct MenuBarView: View {
     private var bottomBar: some View {
         HStack(spacing: 12) {
             Button(action: { manager.refresh() }) {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     if manager.isLoading {
                         ProgressView()
                             .controlSize(.mini)
                     } else {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 10, weight: .bold))
                     }
                     Text("Refresh")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 11, weight: .semibold))
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(manager.apiKey.isEmpty || manager.isLoading
+                              ? Color.clear
+                              : Color.purple.opacity(0.1))
+                )
             }
             .buttonStyle(.plain)
             .foregroundColor(manager.isLoading ? .secondary : .purple)
@@ -313,14 +373,20 @@ struct MenuBarView: View {
 
             Text("v\(UsageManager.currentVersion)")
                 .font(.system(size: 9))
-                .foregroundColor(.secondary.opacity(0.5))
+                .foregroundColor(.secondary.opacity(0.4))
 
             Button(action: { NSApplication.shared.terminate(nil) }) {
                 Text("Quit")
                     .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.primary.opacity(0.04))
+                    )
             }
             .buttonStyle(.plain)
-            .foregroundColor(.secondary)
         }
     }
 }
@@ -329,14 +395,22 @@ struct MenuBarView: View {
 
 struct SettingsSection<Content: View>: View {
     let title: String
+    var icon: String = ""
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
-                .tracking(0.8)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 5) {
+                if !icon.isEmpty {
+                    Image(systemName: icon)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.purple.opacity(0.7))
+                }
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.8)
+            }
             content
         }
     }
@@ -346,40 +420,49 @@ struct SettingsSection<Content: View>: View {
 
 struct UsageBar: View {
     let label: String
+    var icon: String = ""
     let remaining: Int
     let limit: Int
     let percent: Double
     let level: UsageLevel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
+                HStack(spacing: 5) {
+                    if !icon.isEmpty {
+                        Image(systemName: icon)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    Text(label)
+                        .font(.system(size: 12, weight: .semibold))
+                }
                 Spacer()
                 Text("\(Int(percent))%")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .font(.system(size: 14, weight: .heavy, design: .monospaced))
                     .foregroundColor(level.color)
             }
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: 4)
                         .fill(Color.primary.opacity(0.06))
 
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: 4)
                         .fill(
                             LinearGradient(
-                                colors: [level.color.opacity(0.8), level.color],
+                                colors: [level.color.opacity(0.7), level.color],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
                         )
                         .frame(width: max(0, geo.size.width * CGFloat(percent / 100)))
-                        .animation(.easeInOut(duration: 0.6), value: percent)
+                        .shadow(color: level.color.opacity(0.3), radius: 3, y: 1)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: percent)
                 }
             }
-            .frame(height: 6)
+            .frame(height: 8)
 
             Text("\(Formatters.formatNumber(remaining)) / \(Formatters.formatNumber(limit))")
                 .font(.system(size: 10, design: .monospaced))

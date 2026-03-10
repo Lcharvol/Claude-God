@@ -87,7 +87,6 @@ enum Formatters {
 
 // MARK: - Manager principal
 
-@MainActor
 class UsageManager: ObservableObject {
 
     // MARK: - Données d'utilisation
@@ -257,36 +256,54 @@ class UsageManager: ObservableObject {
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
-                self?.isLoading = false
+                guard let self else { return }
+                self.isLoading = false
 
                 if let error = error {
-                    self?.errorMessage = error.localizedDescription
+                    self.errorMessage = error.localizedDescription
+                    print("[ClaudeGod] Network error: \(error.localizedDescription)")
                     return
                 }
 
                 guard let httpResponse = response as? HTTPURLResponse else {
-                    self?.errorMessage = "Invalid response"
+                    self.errorMessage = "Invalid response"
+                    print("[ClaudeGod] No HTTP response")
                     return
                 }
 
+                print("[ClaudeGod] HTTP \(httpResponse.statusCode)")
+
                 switch httpResponse.statusCode {
+                case 200...299:
+                    self.parseRateLimitHeaders(httpResponse)
+                    self.lastRefresh = Date()
+                    self.checkLowUsageNotification()
                 case 401:
-                    self?.errorMessage = "Invalid API key"
+                    self.errorMessage = "Invalid API key"
                 case 403:
-                    self?.errorMessage = "Access denied"
+                    self.errorMessage = "Access denied"
                 case 429:
-                    self?.errorMessage = "Rate limited — try again later"
-                    self?.parseRateLimitHeaders(httpResponse)
-                    self?.lastRefresh = Date()
+                    self.errorMessage = "Rate limited — try again later"
+                    self.parseRateLimitHeaders(httpResponse)
+                    self.lastRefresh = Date()
                 default:
-                    self?.parseRateLimitHeaders(httpResponse)
-                    self?.lastRefresh = Date()
-                    self?.checkLowUsageNotification()
+                    // Lire le body pour avoir le message d'erreur de l'API
+                    if let data = data,
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let apiError = json["error"] as? [String: Any],
+                       let message = apiError["message"] as? String {
+                        self.errorMessage = message
+                        print("[ClaudeGod] API error: \(message)")
+                    } else {
+                        self.errorMessage = "Error \(httpResponse.statusCode)"
+                        print("[ClaudeGod] Unknown error \(httpResponse.statusCode)")
+                    }
                 }
             }
-        }.resume()
+        }
+        task.resume()
     }
 
     // MARK: - Countdown

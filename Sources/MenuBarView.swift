@@ -25,6 +25,8 @@ struct MenuBarView: View {
             Group {
                 if !manager.isAuthenticated || manager.showSettings {
                     settingsView
+                } else if manager.showStats {
+                    statsView
                 } else if manager.isLoading && manager.lastRefresh == nil {
                     loadingView
                 } else if let error = manager.errorMessage {
@@ -83,7 +85,7 @@ struct MenuBarView: View {
 
             Spacer()
 
-            if let lastRefresh = manager.lastRefresh, !manager.showSettings {
+            if let lastRefresh = manager.lastRefresh, !manager.showSettings && !manager.showStats {
                 HStack(spacing: 3) {
                     Circle()
                         .fill(.green)
@@ -94,7 +96,26 @@ struct MenuBarView: View {
                 }
             }
 
-            Button(action: { manager.showSettings.toggle() }) {
+            // Stats button
+            if manager.isAuthenticated && !manager.showSettings {
+                Button(action: { manager.showStats.toggle() }) {
+                    Image(systemName: manager.showStats ? "chart.bar.fill" : "chart.bar")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(manager.showStats ? .purple : .secondary)
+                        .frame(width: 26, height: 26)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.primary.opacity(manager.showStats ? 0.08 : 0.04))
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button(action: {
+                manager.showSettings.toggle()
+                if manager.showSettings { manager.showStats = false }
+            }) {
                 Image(systemName: manager.showSettings ? "xmark" : "gearshape.fill")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.secondary)
@@ -293,6 +314,71 @@ struct MenuBarView: View {
         }
     }
 
+    // MARK: - Stats view
+
+    private var statsView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Cost summary cards
+            HStack(spacing: 8) {
+                CostCard(label: "Today", cost: manager.todayStats.totalCost, messages: manager.todayStats.totalMessages)
+                CostCard(label: "7 days", cost: manager.weekStats.totalCost, messages: manager.weekStats.totalMessages)
+                CostCard(label: "30 days", cost: manager.monthStats.totalCost, messages: manager.monthStats.totalMessages)
+            }
+
+            // Model breakdown
+            if !manager.monthStats.byModel.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("MODELS (30D)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .tracking(0.8)
+
+                    ForEach(manager.monthStats.byModel) { model in
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(colorForModel(model.model))
+                                .frame(width: 6, height: 6)
+                            Text(model.shortName)
+                                .font(.system(size: 11, weight: .medium))
+                            Spacer()
+                            Text(formatTokens(model.tokens.totalTokens))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.secondary)
+                            Text(formatCost(model.cost))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        }
+                    }
+                }
+            }
+
+            // Daily history
+            if !manager.monthStats.daily.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("DAILY HISTORY")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .tracking(0.8)
+
+                    ForEach(manager.monthStats.daily.prefix(7)) { day in
+                        HStack(spacing: 8) {
+                            Text(day.dateLabel)
+                                .font(.system(size: 11))
+                                .frame(width: 70, alignment: .leading)
+                            DailyBar(cost: day.cost, maxCost: maxDailyCost)
+                            Text(formatCost(day.cost))
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .frame(width: 55, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var maxDailyCost: Double {
+        manager.monthStats.daily.prefix(7).map(\.cost).max() ?? 1
+    }
+
     // MARK: - States
 
     private var loadingView: some View {
@@ -397,6 +483,27 @@ struct MenuBarView: View {
             .buttonStyle(.plain)
         }
     }
+
+    // MARK: - Helpers
+
+    private func formatCost(_ cost: Double) -> String {
+        if cost >= 1 { return String(format: "$%.2f", cost) }
+        if cost >= 0.01 { return String(format: "$%.2f", cost) }
+        return String(format: "$%.3f", cost)
+    }
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
+        if count >= 1_000 { return String(format: "%.1fK", Double(count) / 1_000) }
+        return "\(count)"
+    }
+
+    private func colorForModel(_ model: String) -> Color {
+        if model.contains("opus") { return .purple }
+        if model.contains("sonnet") { return .blue }
+        if model.contains("haiku") { return .green }
+        return .gray
+    }
 }
 
 // MARK: - Settings section wrapper
@@ -471,5 +578,65 @@ struct QuotaBar: View {
                     .foregroundColor(.secondary)
             }
         }
+    }
+}
+
+// MARK: - Cost card component
+
+struct CostCard: View {
+    let label: String
+    let cost: Double
+    let messages: Int
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+            Text(cost >= 1 ? String(format: "$%.2f", cost) : String(format: "$%.3f", cost))
+                .font(.system(size: 14, weight: .heavy, design: .monospaced))
+                .foregroundColor(.primary)
+            Text("\(messages) msgs")
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.primary.opacity(0.03))
+        )
+    }
+}
+
+// MARK: - Daily bar component
+
+struct DailyBar: View {
+    let cost: Double
+    let maxCost: Double
+
+    private var fraction: Double {
+        guard maxCost > 0 else { return 0 }
+        return cost / maxCost
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.primary.opacity(0.04))
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(
+                        LinearGradient(
+                            colors: [.purple.opacity(0.6), .purple],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: max(0, geo.size.width * CGFloat(fraction)))
+            }
+        }
+        .frame(height: 6)
     }
 }

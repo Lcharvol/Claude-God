@@ -105,6 +105,13 @@ class UsageManager: ObservableObject {
     @Published var timeUntilReset: String = "—"
     @Published var isAuthenticated = false
 
+    // MARK: - Session stats (ccusage)
+
+    @Published var todayStats = UsageStats()
+    @Published var weekStats = UsageStats()
+    @Published var monthStats = UsageStats()
+    @Published var showStats = false
+
     // MARK: - État de l'interface
 
     @Published var credentialSource: CredentialSource = .none
@@ -213,7 +220,31 @@ class UsageManager: ObservableObject {
             refresh()
         }
 
+        refreshStats()
         checkForUpdates()
+    }
+
+    // MARK: - Session stats
+
+    func refreshStats() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let cal = Calendar.current
+            let now = Date()
+            let todayStart = cal.startOfDay(for: now)
+            let weekStart = cal.date(byAdding: .day, value: -7, to: now)!
+            let monthStart = cal.date(byAdding: .day, value: -30, to: now)!
+
+            let today = SessionAnalyzer.analyze(since: todayStart)
+            let week = SessionAnalyzer.analyze(since: weekStart)
+            let month = SessionAnalyzer.analyze(since: monthStart)
+
+            DispatchQueue.main.async {
+                self?.todayStats = today
+                self?.weekStats = week
+                self?.monthStats = month
+                print("[ClaudeGod] Stats: today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost))")
+            }
+        }
     }
 
     // MARK: - Credential loading
@@ -428,6 +459,7 @@ class UsageManager: ObservableObject {
                     }
                     self.parseUsageResponse(data)
                     self.lastRefresh = Date()
+                    self.refreshStats()
                     self.checkLowUsageNotification()
 
                 case 401, 403:

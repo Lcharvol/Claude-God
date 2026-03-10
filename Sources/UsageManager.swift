@@ -484,9 +484,13 @@ class UsageManager: ObservableObject {
                     }
 
                 case 429:
-                    let retryAfter = httpResponse.value(forHTTPHeaderField: "retry-after") ?? "?"
-                    self.errorMessage = "Rate limited — retry in \(retryAfter)s"
-                    print("[ClaudeGod] Rate limited, retry-after: \(retryAfter)")
+                    // Don't overwrite existing data — keep showing last valid quotas
+                    if !self.quotas.isEmpty {
+                        // Silently ignore, data is still valid
+                        print("[ClaudeGod] Rate limited (429), keeping existing data")
+                    } else {
+                        self.errorMessage = "Rate limited — Claude Code may be active"
+                    }
 
                 default:
                     self.errorMessage = "Error \(httpResponse.statusCode)"

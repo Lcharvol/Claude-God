@@ -2,6 +2,7 @@
 // shadcn-inspired UI — flat, minimal, bordered, muted palette
 
 import SwiftUI
+import AppKit
 
 // MARK: - Design tokens
 
@@ -21,6 +22,7 @@ private enum Theme {
 struct MenuBarView: View {
     @ObservedObject var manager: UsageManager
     @State private var copiedFeedback = false
+    @State private var dailyRange: Int = 7
 
     var body: some View {
         VStack(spacing: 0) {
@@ -243,7 +245,7 @@ struct MenuBarView: View {
 
                     if manager.notificationsEnabled {
                         HStack(spacing: 6) {
-                            Text("at")
+                            Text("Remaining <")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                             Text("\(Int(manager.notificationThreshold))%")
@@ -287,6 +289,35 @@ struct MenuBarView: View {
                         .font(.system(size: 12))
                         .toggleStyle(.switch)
                         .controlSize(.small)
+                }
+            }
+
+            // About
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    SHLabel("About")
+                    HStack(spacing: 8) {
+                        Text("Claude God v\(UpdateChecker.currentVersion)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        SHButton(label: "GitHub", icon: "link", style: .outline) {
+                            if let url = URL(string: "https://github.com/Lcharvol/Claude-God") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Text("Free & open source")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        SHButton(label: "Report issue", icon: "exclamationmark.bubble", style: .ghost) {
+                            if let url = URL(string: "https://github.com/Lcharvol/Claude-God/issues") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -416,115 +447,154 @@ struct MenuBarView: View {
 
     private var statsView: some View {
         VStack(spacing: 10) {
-            // Cost cards
-            HStack(spacing: 6) {
-                SHStatCard(label: "Today", value: formatCost(manager.todayStats.totalCost), sub: "\(manager.todayStats.totalMessages) msgs")
-                SHStatCard(label: "7 days", value: formatCost(manager.weekStats.totalCost), sub: "\(manager.weekStats.totalMessages) msgs")
-                SHStatCard(label: "30 days", value: formatCost(manager.monthStats.totalCost), sub: "\(manager.monthStats.totalMessages) msgs")
-            }
-
-            // Sparkline
-            if manager.monthStats.daily.count >= 2 {
-                SHCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            SHLabel("Usage Trend")
-                            Spacer()
-                            Text("7 days")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                        }
-                        SparklineView(
-                            data: Array(manager.monthStats.daily.prefix(7).reversed().map(\.cost))
-                        )
-                        .frame(height: 44)
-                    }
+            if manager.monthStats.totalMessages == 0 {
+                // Empty state
+                VStack(spacing: 10) {
+                    Image(systemName: "chart.bar")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundColor(.secondary.opacity(0.5))
+                    Text("No session data found")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Text("Analytics appear after using Claude Code.\nData is read from ~/.claude/projects/")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary.opacity(0.7))
+                        .multilineTextAlignment(.center)
                 }
-            }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            } else {
+                // Cost cards with session count
+                HStack(spacing: 6) {
+                    SHStatCard(label: "Today", value: formatCost(manager.todayStats.totalCost), sub: "\(manager.todayStats.totalMessages) msgs")
+                    SHStatCard(label: "7 days", value: formatCost(manager.weekStats.totalCost), sub: "\(manager.weekStats.totalMessages) msgs")
+                    SHStatCard(
+                        label: "30 days",
+                        value: formatCost(manager.monthStats.totalCost),
+                        sub: "\(manager.monthStats.totalMessages) msgs · \(manager.monthStats.sessionCount) sessions"
+                    )
+                }
 
-            // Models
-            if !manager.monthStats.byModel.isEmpty {
-                SHCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        SHLabel("Models")
-                        ForEach(manager.monthStats.byModel) { model in
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(colorForModel(model.model))
-                                    .frame(width: 6, height: 6)
-                                Text(model.shortName)
-                                    .font(.system(size: 11, weight: .medium))
+                // Sparkline
+                if manager.monthStats.daily.count >= 2 {
+                    SHCard {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                SHLabel("Usage Trend")
                                 Spacer()
-                                Text(formatTokens(model.tokens.totalTokens))
-                                    .font(.system(size: 10, design: .monospaced))
+                                Text("7 days")
+                                    .font(.system(size: 10))
                                     .foregroundColor(.secondary)
-                                Text(formatCost(model.cost))
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                    .frame(width: 48, alignment: .trailing)
                             }
+                            SparklineView(
+                                data: Array(manager.monthStats.daily.prefix(7).reversed().map(\.cost)),
+                                labels: Array(manager.monthStats.daily.prefix(7).reversed().map(\.dateLabel))
+                            )
+                            .frame(height: 50)
                         }
                     }
                 }
-            }
 
-            // Daily
-            if !manager.monthStats.daily.isEmpty {
-                SHCard {
-                    VStack(alignment: .leading, spacing: 6) {
-                        SHLabel("Daily")
-                        ForEach(manager.monthStats.daily.prefix(7)) { day in
-                            HStack(spacing: 6) {
-                                Text(day.dateLabel)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 60, alignment: .leading)
-
-                                GeometryReader { geo in
-                                    ZStack(alignment: .leading) {
-                                        RoundedRectangle(cornerRadius: 2)
-                                            .fill(Theme.muted)
-                                        RoundedRectangle(cornerRadius: 2)
-                                            .fill(Theme.accent.opacity(0.5))
-                                            .frame(width: max(0, geo.size.width * CGFloat(day.cost / maxDailyCost)))
-                                    }
+                // Models
+                if !manager.monthStats.byModel.isEmpty {
+                    SHCard {
+                        VStack(alignment: .leading, spacing: 8) {
+                            SHLabel("Models")
+                            ForEach(manager.monthStats.byModel) { model in
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(colorForModel(model.model))
+                                        .frame(width: 6, height: 6)
+                                    Text(model.shortName)
+                                        .font(.system(size: 11, weight: .medium))
+                                    Spacer()
+                                    Text(formatTokens(model.tokens.totalTokens))
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                    Text(formatCost(model.cost))
+                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .frame(width: 48, alignment: .trailing)
                                 }
-                                .frame(height: 5)
-
-                                Text(formatCost(day.cost))
-                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                    .frame(width: 46, alignment: .trailing)
                             }
                         }
                     }
                 }
-            }
 
-            // Actions
-            HStack(spacing: 6) {
-                SHButton(
-                    label: copiedFeedback ? "Copied!" : "Copy",
-                    icon: copiedFeedback ? "checkmark" : "doc.on.doc",
-                    style: copiedFeedback ? .success : .outline
-                ) {
-                    if manager.copyStatsToClipboard() {
-                        copiedFeedback = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            copiedFeedback = false
+                // Daily with period selector
+                if !manager.monthStats.daily.isEmpty {
+                    SHCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                SHLabel("Daily")
+                                Spacer()
+                                Picker("Range", selection: $dailyRange) {
+                                    Text("7d").tag(7)
+                                    Text("14d").tag(14)
+                                    Text("30d").tag(30)
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.segmented)
+                                .frame(width: 120)
+                                .controlSize(.mini)
+                            }
+                            ForEach(manager.monthStats.daily.prefix(dailyRange)) { day in
+                                HStack(spacing: 6) {
+                                    Text(day.dateLabel)
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 60, alignment: .leading)
+
+                                    GeometryReader { geo in
+                                        ZStack(alignment: .leading) {
+                                            RoundedRectangle(cornerRadius: 2)
+                                                .fill(Theme.muted)
+                                            RoundedRectangle(cornerRadius: 2)
+                                                .fill(Theme.accent.opacity(0.5))
+                                                .frame(width: max(0, geo.size.width * CGFloat(day.cost / maxDailyCost)))
+                                        }
+                                    }
+                                    .frame(height: 5)
+
+                                    Text(formatCost(day.cost))
+                                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                        .frame(width: 46, alignment: .trailing)
+                                }
+                            }
                         }
                     }
                 }
 
-                SHButton(label: "Export CSV", icon: "square.and.arrow.up", style: .outline) {
-                    manager.exportCSV()
-                }
+                // Actions
+                HStack(spacing: 6) {
+                    SHButton(label: "Refresh", icon: "arrow.clockwise", style: .outline) {
+                        manager.refreshStats()
+                    }
 
-                Spacer()
+                    SHButton(
+                        label: copiedFeedback ? "Copied!" : "Copy",
+                        icon: copiedFeedback ? "checkmark" : "doc.on.doc",
+                        style: copiedFeedback ? .success : .outline
+                    ) {
+                        if manager.copyStatsToClipboard() {
+                            copiedFeedback = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                copiedFeedback = false
+                            }
+                        }
+                    }
+
+                    SHButton(label: "CSV", icon: "square.and.arrow.up", style: .outline) {
+                        manager.exportCSV()
+                    }
+
+                    Spacer()
+                }
             }
         }
     }
 
     private var maxDailyCost: Double {
-        manager.monthStats.daily.prefix(7).map(\.cost).max() ?? 1
+        manager.monthStats.daily.prefix(dailyRange).map(\.cost).max() ?? 1
     }
 
     // MARK: - States
@@ -841,6 +911,13 @@ struct SHStatCard: View {
 
 struct SparklineView: View {
     let data: [Double]
+    var labels: [String] = []
+    @State private var hoveredIndex: Int?
+
+    private func formatCost(_ cost: Double) -> String {
+        if cost >= 0.01 { return String(format: "$%.2f", cost) }
+        return String(format: "$%.3f", cost)
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -850,7 +927,7 @@ struct SparklineView: View {
             let stepX = geo.size.width / CGFloat(max(data.count - 1, 1))
             let points: [CGPoint] = data.enumerated().map { i, val in
                 let x = CGFloat(i) * stepX
-                let y = geo.size.height - (CGFloat((val - minVal) / range) * (geo.size.height - 8)) - 4
+                let y = geo.size.height - (CGFloat((val - minVal) / range) * (geo.size.height - 12)) - 6
                 return CGPoint(x: x, y: y)
             }
 
@@ -888,12 +965,57 @@ struct SparklineView: View {
                     .stroke(Theme.accent.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                 }
 
-                // End dot
-                if let last = points.last {
+                // Hovered point indicator
+                if let idx = hoveredIndex, idx < points.count {
+                    let pt = points[idx]
+
+                    // Vertical line
+                    Path { path in
+                        path.move(to: CGPoint(x: pt.x, y: 0))
+                        path.addLine(to: CGPoint(x: pt.x, y: geo.size.height))
+                    }
+                    .stroke(Theme.accent.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+
+                    // Dot
+                    Circle()
+                        .fill(Theme.accent)
+                        .frame(width: 6, height: 6)
+                        .position(pt)
+
+                    // Tooltip
+                    VStack(spacing: 1) {
+                        if idx < labels.count {
+                            Text(labels[idx])
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                        Text(formatCost(data[idx]))
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                            .shadow(color: Color.black.opacity(0.1), radius: 2, y: 1)
+                    )
+                    .position(x: min(max(pt.x, 25), geo.size.width - 25), y: max(pt.y - 16, 10))
+                } else if let last = points.last {
+                    // Default end dot when not hovering
                     Circle()
                         .fill(Theme.accent)
                         .frame(width: 4, height: 4)
                         .position(last)
+                }
+            }
+            .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    let idx = Int((location.x / stepX).rounded())
+                    hoveredIndex = min(max(idx, 0), data.count - 1)
+                case .ended:
+                    hoveredIndex = nil
                 }
             }
         }

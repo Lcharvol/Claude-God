@@ -114,8 +114,23 @@ struct UsageStats {
     var totalCost: Double = 0
     var totalTokens: TokenUsage = TokenUsage()
     var totalMessages: Int = 0
+    var sessionCount: Int = 0
     var byModel: [ModelUsage] = []
     var daily: [DailyUsage] = []
+
+    /// Derive a sub-period from the full analysis (avoids re-scanning files)
+    func filtered(since: Date) -> UsageStats {
+        let sinceDay = Calendar.current.startOfDay(for: since)
+        let filteredDaily = daily.filter { $0.date >= sinceDay }
+        return UsageStats(
+            totalCost: filteredDaily.reduce(0) { $0 + $1.cost },
+            totalTokens: filteredDaily.reduce(into: TokenUsage()) { $0.add($1.tokens) },
+            totalMessages: filteredDaily.reduce(0) { $0 + $1.messageCount },
+            sessionCount: 0,
+            byModel: [],
+            daily: filteredDaily
+        )
+    }
 }
 
 // MARK: - Analyzer
@@ -169,6 +184,7 @@ class SessionAnalyzer {
         var modelAgg: [String: (tokens: TokenUsage, cost: Double)] = [:]
         var dailyAgg: [String: (date: Date, tokens: TokenUsage, cost: Double, count: Int)] = [:]
         var totalMessages = 0
+        var sessionFiles = Set<String>()
 
         let cal = Calendar.current
 
@@ -188,6 +204,7 @@ class SessionAnalyzer {
                 else { continue }
 
                 // Use enumerateLines for memory-efficient line-by-line processing
+                var fileHadMatch = false
                 content.enumerateLines { line, _ in
                     guard !line.isEmpty,
                           let lineData = line.data(using: .utf8),
@@ -246,6 +263,11 @@ class SessionAnalyzer {
                     dailyAgg[dayKey] = dayExisting
 
                     totalMessages += 1
+                    fileHadMatch = true
+                }
+
+                if fileHadMatch {
+                    sessionFiles.insert(file.lastPathComponent)
                 }
             }
         }
@@ -266,6 +288,7 @@ class SessionAnalyzer {
             totalCost: totalCost,
             totalTokens: totalTokens,
             totalMessages: totalMessages,
+            sessionCount: sessionFiles.count,
             byModel: byModel,
             daily: daily
         )

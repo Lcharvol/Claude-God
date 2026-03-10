@@ -227,6 +227,7 @@ class UsageManager: ObservableObject {
     @Published var menuBarDisplayMode: MenuBarDisplayMode {
         didSet {
             UserDefaults.standard.set(menuBarDisplayMode.rawValue, forKey: "menuBarDisplayMode")
+            setupCountdownTimer()
         }
     }
 
@@ -311,11 +312,7 @@ class UsageManager: ObservableObject {
 
         auth.loadCredentials()
 
-        countdownTimer = Timer.publish(every: 1, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.updateCountdown()
-            }
+        setupCountdownTimer()
 
         setupAutoRefresh()
 
@@ -331,7 +328,7 @@ class UsageManager: ObservableObject {
         checkForUpdates()
     }
 
-    // MARK: - Session stats
+    // MARK: - Session stats (single-pass optimization)
 
     func refreshStats() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -341,15 +338,16 @@ class UsageManager: ObservableObject {
             let weekStart = cal.date(byAdding: .day, value: -7, to: now)!
             let monthStart = cal.date(byAdding: .day, value: -30, to: now)!
 
-            let today = SessionAnalyzer.analyze(since: todayStart)
-            let week = SessionAnalyzer.analyze(since: weekStart)
+            // Single pass — scan files once for 30 days, then derive sub-periods
             let month = SessionAnalyzer.analyze(since: monthStart)
+            let week = month.filtered(since: weekStart)
+            let today = month.filtered(since: todayStart)
 
             DispatchQueue.main.async {
                 self?.todayStats = today
                 self?.weekStats = week
                 self?.monthStats = month
-                print("[ClaudeGod] Stats: today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost))")
+                print("[ClaudeGod] Stats (single-pass): today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost)) sessions=\(month.sessionCount)")
             }
         }
     }
@@ -545,6 +543,17 @@ class UsageManager: ObservableObject {
     }
 
     // MARK: - Countdown
+
+    private func setupCountdownTimer() {
+        countdownTimer?.cancel()
+        // 1s when timer is visible in menu bar, 30s otherwise (only visible in popover)
+        let interval: TimeInterval = menuBarDisplayMode == .percentageAndTimer ? 1 : 30
+        countdownTimer = Timer.publish(every: interval, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.updateCountdown()
+            }
+    }
 
     private func updateCountdown() {
         guard let reset = nextResetDate else {

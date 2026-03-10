@@ -34,7 +34,7 @@ jobs:
       - name: Create DMG
         run: |
           APP_PATH="build/Build/Products/Release/Claude God.app"
-          DMG_NAME="ClaudeGod-${{ github.ref_name }}.dmg"
+          DMG_NAME="ClaudeGod.dmg"
 
           # Create a temporary directory for the DMG contents
           mkdir -p dmg-contents
@@ -52,6 +52,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ClaudeGod-*.dmg
+          files: ClaudeGod.dmg
           generate_release_notes: true
           draft: false

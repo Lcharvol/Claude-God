@@ -3,14 +3,14 @@
 A lightweight macOS menu bar app that monitors your Anthropic API rate limits in real time.
 
 [![CI](https://github.com/Lcharvol/Claude-God/actions/workflows/ci.yml/badge.svg)](https://github.com/Lcharvol/Claude-God/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Lcharvol/Claude-God)](https://github.com/Lcharvol/Claude-God/releases/latest)
+[![Release](https://img.shields.io/github/v/release/Lcharvol/Claude-God)](https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ## Download
 
-**[Download the latest .dmg](https://github.com/Lcharvol/Claude-God/releases/latest)** — no Xcode required.
+**[Download the latest .dmg](https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg)** — no Xcode required.
 
 1. Open the `.dmg`, drag **Claude God** to Applications
 2. Launch it — a `C` icon appears in the menu bar

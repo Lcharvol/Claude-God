@@ -483,6 +483,11 @@ class UsageManager: ObservableObject {
                         self.errorMessage = "Session expired — run `claude login`"
                     }
 
+                case 429:
+                    let retryAfter = httpResponse.value(forHTTPHeaderField: "retry-after") ?? "?"
+                    self.errorMessage = "Rate limited — retry in \(retryAfter)s"
+                    print("[ClaudeGod] Rate limited, retry-after: \(retryAfter)")
+
                 default:
                     self.errorMessage = "Error \(httpResponse.statusCode)"
                     print("[ClaudeGod] Error \(httpResponse.statusCode)")

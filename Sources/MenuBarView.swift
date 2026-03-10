@@ -8,7 +8,6 @@ import AppKit
 
 private enum Theme {
     static let radius: CGFloat = 8
-    static let radiusLg: CGFloat = 10
     static let border = Color.primary.opacity(0.08)
     static let borderHover = Color.primary.opacity(0.15)
     static let muted = Color.primary.opacity(0.04)
@@ -22,7 +21,7 @@ private enum Theme {
 struct MenuBarView: View {
     @ObservedObject var manager: UsageManager
     @State private var copiedFeedback = false
-    @State private var dailyRange: Int = 7
+    @AppStorage("dailyRange") private var dailyRange: Int = 7
 
     var body: some View {
         VStack(spacing: 0) {
@@ -139,9 +138,11 @@ struct MenuBarView: View {
             SHTab(label: "Usage", isActive: !manager.showStats) {
                 manager.showStats = false
             }
+            .keyboardShortcut("1", modifiers: .command)
             SHTab(label: "Analytics", isActive: manager.showStats) {
                 manager.showStats = true
             }
+            .keyboardShortcut("2", modifiers: .command)
         }
         .padding(2)
         .background(
@@ -244,13 +245,18 @@ struct MenuBarView: View {
                         .controlSize(.small)
 
                     if manager.notificationsEnabled {
-                        HStack(spacing: 6) {
-                            Text("Remaining <")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                            Text("\(Int(manager.notificationThreshold))%")
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                Text("Alert at")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                                Text("\(Int(100 - manager.notificationThreshold))% used")
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                Spacer()
+                                Text("(\(Int(manager.notificationThreshold))% left)")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
                             Slider(value: $manager.notificationThreshold, in: 5...50, step: 5)
                                 .controlSize(.small)
                         }
@@ -339,10 +345,12 @@ struct MenuBarView: View {
                                     .font(.system(size: 12, weight: .medium))
                             }
                             Spacer()
-                            Text("\(Int(quota.utilization))%")
+                            Text(formatUtilization(quota.utilization))
                                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                                 .foregroundColor(quota.level.color)
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(quota.label), \(Int(quota.utilization)) percent used")
 
                         // Progress bar
                         GeometryReader { geo in
@@ -357,9 +365,10 @@ struct MenuBarView: View {
                             }
                         }
                         .frame(height: 6)
+                        .accessibilityHidden(true)
 
                         if let resetsAt = quota.resetsAt, resetsAt.timeIntervalSinceNow > 0 {
-                            Text("Resets \(resetsAt.formatted(date: .omitted, time: .shortened))")
+                            Text("Resets \(relativeResetTime(resetsAt))")
                                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                                 .foregroundColor(.secondary)
                         }
@@ -385,6 +394,8 @@ struct MenuBarView: View {
                 RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
                     .fill(Theme.muted)
             )
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Next reset \(manager.timeUntilReset)")
         }
     }
 
@@ -408,13 +419,16 @@ struct MenuBarView: View {
                             .fill(quota.level.color)
                             .frame(width: 44 * CGFloat(min(quota.utilization, 100) / 100), height: 4)
                     }
+                    .accessibilityHidden(true)
 
-                    Text("\(Int(quota.utilization))%")
+                    Text(formatUtilization(quota.utilization))
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(quota.level.color)
-                        .frame(width: 32, alignment: .trailing)
+                        .frame(width: 38, alignment: .trailing)
                 }
                 .padding(.vertical, 3)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(quota.label), \(Int(quota.utilization)) percent used")
             }
 
             SHDivider().padding(.vertical, 2)
@@ -475,20 +489,20 @@ struct MenuBarView: View {
                     )
                 }
 
-                // Sparkline
+                // Sparkline (follows dailyRange)
                 if manager.monthStats.daily.count >= 2 {
                     SHCard {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 SHLabel("Usage Trend")
                                 Spacer()
-                                Text("7 days")
+                                Text("\(dailyRange) days")
                                     .font(.system(size: 10))
                                     .foregroundColor(.secondary)
                             }
                             SparklineView(
-                                data: Array(manager.monthStats.daily.prefix(7).reversed().map(\.cost)),
-                                labels: Array(manager.monthStats.daily.prefix(7).reversed().map(\.dateLabel))
+                                data: Array(manager.monthStats.daily.prefix(dailyRange).reversed().map(\.cost)),
+                                labels: Array(manager.monthStats.daily.prefix(dailyRange).reversed().map(\.dateLabel))
                             )
                             .frame(height: 50)
                         }
@@ -515,6 +529,18 @@ struct MenuBarView: View {
                                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                         .frame(width: 48, alignment: .trailing)
                                 }
+                            }
+                            SHDivider()
+                            HStack(spacing: 6) {
+                                Text("Total")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Spacer()
+                                Text(formatTokens(manager.monthStats.totalTokens.totalTokens))
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                Text(formatCost(manager.monthStats.totalCost))
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .frame(width: 48, alignment: .trailing)
                             }
                         }
                     }
@@ -559,6 +585,7 @@ struct MenuBarView: View {
                                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                                         .frame(width: 46, alignment: .trailing)
                                 }
+                                .help("\(day.dateLabel): \(formatCost(day.cost)) · \(day.messageCount) msgs · \(formatTokens(day.tokens.totalTokens)) tokens")
                             }
                         }
                     }
@@ -566,9 +593,10 @@ struct MenuBarView: View {
 
                 // Actions
                 HStack(spacing: 6) {
-                    SHButton(label: "Refresh", icon: "arrow.clockwise", style: .outline) {
+                    SHButton(label: "Refresh", icon: manager.isLoadingStats ? nil : "arrow.clockwise", style: .outline, isLoading: manager.isLoadingStats) {
                         manager.refreshStats()
                     }
+                    .disabled(manager.isLoadingStats)
 
                     SHButton(
                         label: copiedFeedback ? "Copied!" : "Copy",
@@ -625,6 +653,9 @@ struct MenuBarView: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
+                SHButton(label: "Retry", icon: "arrow.clockwise", style: .outline) {
+                    manager.refresh()
+                }
             }
         }
     }
@@ -682,6 +713,21 @@ struct MenuBarView: View {
         if model.contains("sonnet") { return .blue }
         if model.contains("haiku") { return .green }
         return .gray
+    }
+
+    private func formatUtilization(_ value: Double) -> String {
+        if value >= 99.5 { return "100%" }
+        if value >= 95 { return String(format: "%.1f%%", value) }
+        return "\(Int(value))%"
+    }
+
+    private func relativeResetTime(_ date: Date) -> String {
+        let remaining = date.timeIntervalSinceNow
+        guard remaining > 0 else { return "now" }
+        let hours = Int(remaining) / 3600
+        let minutes = (Int(remaining) % 3600) / 60
+        if hours > 0 { return "in \(hours)h \(minutes)m" }
+        return "in \(minutes)m"
     }
 }
 
@@ -892,6 +938,8 @@ struct SHStatCard: View {
                 .textCase(.uppercase)
             Text(value)
                 .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .contentTransition(.numericText())
+                .animation(.easeOut(duration: 0.3), value: value)
             if !sub.isEmpty {
                 Text(sub)
                     .font(.system(size: 9))
@@ -904,6 +952,8 @@ struct SHStatCard: View {
             RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label): \(value)" + (sub.isEmpty ? "" : ", \(sub)"))
     }
 }
 
@@ -913,13 +963,25 @@ struct SparklineView: View {
     let data: [Double]
     var labels: [String] = []
     @State private var hoveredIndex: Int?
+    @Environment(\.colorScheme) private var colorScheme
 
     private func formatCost(_ cost: Double) -> String {
         if cost >= 0.01 { return String(format: "$%.2f", cost) }
         return String(format: "$%.3f", cost)
     }
 
+    private var fillOpacity: Double {
+        colorScheme == .dark ? 0.2 : 0.1
+    }
+
+    @ViewBuilder
     var body: some View {
+        if data.count >= 2 {
+            sparklineContent
+        }
+    }
+
+    private var sparklineContent: some View {
         GeometryReader { geo in
             let maxVal = data.max() ?? 1
             let minVal = data.min() ?? 0
@@ -948,7 +1010,7 @@ struct SparklineView: View {
                         path.addLine(to: CGPoint(x: points.last!.x, y: geo.size.height))
                         path.closeSubpath()
                     }
-                    .fill(Theme.accentMuted)
+                    .fill(Theme.accent.opacity(fillOpacity))
 
                     // Line
                     Path { path in

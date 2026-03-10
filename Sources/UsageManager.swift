@@ -184,6 +184,7 @@ class UsageManager: ObservableObject {
     @Published var weekStats = UsageStats()
     @Published var monthStats = UsageStats()
     @Published var showStats = false
+    @Published var isLoadingStats = false
 
     // MARK: - État de l'interface
 
@@ -254,8 +255,13 @@ class UsageManager: ObservableObject {
         }
     }
 
+    /// The quota with the highest utilization (worst state)
+    private var worstQuota: UsageQuota? {
+        quotas.max(by: { $0.utilization < $1.utilization })
+    }
+
     var menuBarIcon: String {
-        guard let q = primaryQuota else { return "c.circle" }
+        guard let q = worstQuota else { return "c.circle" }
         switch q.level {
         case .critical: return "c.circle.fill"
         case .warning: return "c.circle.fill"
@@ -264,7 +270,7 @@ class UsageManager: ObservableObject {
     }
 
     var menuBarIconColor: Color {
-        guard let q = primaryQuota else { return .primary }
+        guard let q = worstQuota else { return .primary }
         return q.level.color
     }
 
@@ -311,6 +317,18 @@ class UsageManager: ObservableObject {
         }.store(in: &cancellables)
 
         auth.loadCredentials()
+        auth.startWatchingCredentials()
+
+        // Auto-connect when credentials appear via file watcher
+        auth.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if self.isAuthenticated && self.quotas.isEmpty && !self.isLoading {
+                    self.showSettings = false
+                    self.refresh()
+                }
+            }
+        }.store(in: &cancellables)
 
         setupCountdownTimer()
 
@@ -331,6 +349,9 @@ class UsageManager: ObservableObject {
     // MARK: - Session stats (single-pass optimization)
 
     func refreshStats() {
+        guard !isLoadingStats else { return }
+        isLoadingStats = true
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let cal = Calendar.current
             let now = Date()
@@ -347,6 +368,7 @@ class UsageManager: ObservableObject {
                 self?.todayStats = today
                 self?.weekStats = week
                 self?.monthStats = month
+                self?.isLoadingStats = false
                 print("[ClaudeGod] Stats (single-pass): today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost)) sessions=\(month.sessionCount)")
             }
         }
@@ -567,10 +589,19 @@ class UsageManager: ObservableObject {
         }
         let hours = Int(remaining) / 3600
         let minutes = (Int(remaining) % 3600) / 60
-        let seconds = Int(remaining) % 60
-        let newValue = hours > 0
-            ? "\(hours)h \(minutes)m \(seconds)s"
-            : "\(minutes)m \(seconds)s"
+        let newValue: String
+        if menuBarDisplayMode == .percentageAndTimer {
+            // Show seconds only when timer is visible in menu bar
+            let seconds = Int(remaining) % 60
+            newValue = hours > 0
+                ? "\(hours)h \(minutes)m \(seconds)s"
+                : "\(minutes)m \(seconds)s"
+        } else {
+            // Coarser display for popover-only (updates every 30s)
+            newValue = hours > 0
+                ? "\(hours)h \(minutes)m"
+                : "\(minutes)m"
+        }
         if timeUntilReset != newValue { timeUntilReset = newValue }
     }
 
@@ -590,6 +621,7 @@ class UsageManager: ObservableObject {
         .autoconnect()
         .sink { [weak self] _ in
             self?.refresh()
+            self?.refreshStats()
         }
     }
 

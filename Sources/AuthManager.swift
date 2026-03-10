@@ -25,6 +25,8 @@ class AuthManager: ObservableObject {
     private(set) var refreshToken: String?
     private(set) var tokenExpiresAt: Double?
 
+    private var credentialsWatcher: DispatchSourceFileSystemObject?
+
     private static let refreshURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
     private static let clientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
     private static let scopes = "user:profile user:inference user:sessions:claude_code"
@@ -163,6 +165,47 @@ class AuthManager: ObservableObject {
         } catch {
             print("[ClaudeGod] Failed to persist tokens: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: - Credentials file watcher
+
+    func startWatchingCredentials() {
+        stopWatchingCredentials()
+
+        let path = Self.credentialsPath.path
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .rename],
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            // Small delay to let the file finish writing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                let wasAuthenticated = self.isAuthenticated
+                self.loadCredentials()
+                if !wasAuthenticated && self.isAuthenticated {
+                    print("[ClaudeGod] Credentials detected via file watcher")
+                }
+            }
+        }
+        source.setCancelHandler {
+            close(fd)
+        }
+        source.resume()
+        credentialsWatcher = source
+    }
+
+    private func stopWatchingCredentials() {
+        credentialsWatcher?.cancel()
+        credentialsWatcher = nil
+    }
+
+    deinit {
+        stopWatchingCredentials()
     }
 
     // MARK: - Keychain

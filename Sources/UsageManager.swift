@@ -29,6 +29,35 @@ enum RefreshInterval: Int, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Menu bar display mode
+
+enum MenuBarDisplayMode: Int, CaseIterable, Identifiable {
+    case iconOnly = 0
+    case percentage = 1
+    case percentageAndTimer = 2
+    case allQuotas = 3
+
+    var id: Int { rawValue }
+
+    var label: String {
+        switch self {
+        case .iconOnly: return "Icon"
+        case .percentage: return "Session"
+        case .percentageAndTimer: return "Timer"
+        case .allQuotas: return "All"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .iconOnly: return "C"
+        case .percentage: return "C 15%"
+        case .percentageAndTimer: return "C 15% · 2h31m"
+        case .allQuotas: return "C 15% | 31% | 22%"
+        }
+    }
+}
+
 // MARK: - Seuils de couleur partagés
 
 enum UsageLevel {
@@ -195,6 +224,12 @@ class UsageManager: ObservableObject {
         }
     }
 
+    @Published var menuBarDisplayMode: MenuBarDisplayMode {
+        didSet {
+            UserDefaults.standard.set(menuBarDisplayMode.rawValue, forKey: "menuBarDisplayMode")
+        }
+    }
+
     // MARK: - Propriétés calculées
 
     var primaryQuota: UsageQuota? {
@@ -202,8 +237,20 @@ class UsageManager: ObservableObject {
     }
 
     var menuBarTitle: String {
-        guard let q = primaryQuota else { return "—" }
-        return "\(Int(q.utilization))%"
+        switch menuBarDisplayMode {
+        case .iconOnly:
+            return ""
+        case .percentage:
+            guard let q = primaryQuota else { return "—" }
+            return "\(Int(q.utilization))%"
+        case .percentageAndTimer:
+            guard let q = primaryQuota else { return "—" }
+            let timer = timeUntilReset == "—" ? "" : " · \(timeUntilReset)"
+            return "\(Int(q.utilization))%\(timer)"
+        case .allQuotas:
+            if quotas.isEmpty { return "—" }
+            return quotas.map { "\(Int($0.utilization))%" }.joined(separator: " | ")
+        }
     }
 
     var menuBarIcon: String {
@@ -250,6 +297,8 @@ class UsageManager: ObservableObject {
         self.notificationThreshold = UserDefaults.standard.object(forKey: "notificationThreshold") as? Double ?? 20.0
         self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         self.compactMode = UserDefaults.standard.bool(forKey: "compactMode")
+        let savedDisplayMode = UserDefaults.standard.integer(forKey: "menuBarDisplayMode")
+        self.menuBarDisplayMode = MenuBarDisplayMode(rawValue: savedDisplayMode) ?? .percentage
 
         // Forward objectWillChange from sub-managers
         auth.objectWillChange.sink { [weak self] _ in

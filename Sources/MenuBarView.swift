@@ -256,6 +256,24 @@ struct MenuBarView: View {
                 }
             }
 
+            // Menu bar display
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    SHLabel("Menu bar")
+                    Picker("Display", selection: $manager.menuBarDisplayMode) {
+                        ForEach(MenuBarDisplayMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+
+                    Text(manager.menuBarDisplayMode.description)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+
             // Display + System
             SHCard {
                 VStack(alignment: .leading, spacing: 8) {

@@ -71,7 +71,7 @@ struct MenuBarView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .frame(maxHeight: 600)
+            .frame(minHeight: 300, maxHeight: 600)
 
             SHDivider()
 

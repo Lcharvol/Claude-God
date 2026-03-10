@@ -692,7 +692,7 @@
 
         .how-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 2rem;
         }
 
@@ -1107,10 +1107,15 @@
             <div class="how-step">
                 <div class="how-num">2</div>
                 <h3>Install</h3>
-                <p>Open the DMG, drag Claude God to your Applications folder. Launch it.</p>
+                <p>Open the DMG, drag Claude God to your Applications folder.</p>
             </div>
             <div class="how-step">
                 <div class="how-num">3</div>
+                <h3>Allow &amp; launch</h3>
+                <p>First launch: open Terminal and run<br><code>xattr -cr /Applications/Claude\ God.app</code><br>Then open the app normally.</p>
+            </div>
+            <div class="how-step">
+                <div class="how-num">4</div>
                 <h3>Paste your key</h3>
                 <p>Click the <code>C</code> icon in the menu bar, enter your <a href="https://console.anthropic.com/" target="_blank" style="color: var(--accent); text-decoration: none;">Anthropic API key</a>. Done.</p>
             </div>

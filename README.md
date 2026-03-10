@@ -13,10 +13,13 @@ A lightweight macOS menu bar app that monitors your Anthropic API rate limits in
 **[Download the latest .dmg](https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg)** — no Xcode required.
 
 1. Open the `.dmg`, drag **Claude God** to Applications
-2. Launch it — a `C` icon appears in the menu bar
-3. Click the icon, paste your [Anthropic API key](https://console.anthropic.com/), hit Save
-
-That's it.
+2. First launch — open Terminal and run:
+   ```bash
+   xattr -cr /Applications/Claude\ God.app
+   ```
+   *(required once because the app is not notarized)*
+3. Launch it — a `C` icon appears in the menu bar
+4. Click the icon, paste your [Anthropic API key](https://console.anthropic.com/), hit Save
 
 ## Features
 

@@ -10,20 +10,17 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             header
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
                 .padding(.bottom, 10)
 
-            // Update banner
             if manager.updateAvailable {
                 updateBanner
             }
 
             Divider()
 
-            // Content
             Group {
                 if manager.apiKey.isEmpty || manager.showSettings {
                     settingsView
@@ -42,7 +39,6 @@ struct MenuBarView: View {
 
             Divider()
 
-            // Bottom bar
             bottomBar
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -74,8 +70,8 @@ struct MenuBarView: View {
 
             Spacer()
 
-            if manager.lastRefresh != nil && !manager.showSettings {
-                Text(manager.lastRefresh?.formatted(date: .omitted, time: .shortened) ?? "")
+            if let lastRefresh = manager.lastRefresh, !manager.showSettings {
+                Text(lastRefresh.formatted(date: .omitted, time: .shortened))
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
@@ -122,8 +118,6 @@ struct MenuBarView: View {
 
     private var settingsView: some View {
         VStack(alignment: .leading, spacing: 14) {
-
-            // API Key
             SettingsSection(title: "API Key") {
                 VStack(alignment: .leading, spacing: 6) {
                     SecureField("sk-ant-api03-...", text: $manager.apiKey)
@@ -169,7 +163,6 @@ struct MenuBarView: View {
                 }
             }
 
-            // Auto-refresh
             SettingsSection(title: "Auto-refresh") {
                 Picker("Interval", selection: $manager.refreshInterval) {
                     ForEach(RefreshInterval.allCases) { interval in
@@ -180,7 +173,6 @@ struct MenuBarView: View {
                 .pickerStyle(.segmented)
             }
 
-            // Notifications
             SettingsSection(title: "Notifications") {
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle("Alert when tokens are low", isOn: $manager.notificationsEnabled)
@@ -204,7 +196,6 @@ struct MenuBarView: View {
                 }
             }
 
-            // Launch at Login
             SettingsSection(title: "System") {
                 Toggle("Launch at login", isOn: $manager.launchAtLogin)
                     .font(.system(size: 12))
@@ -222,19 +213,20 @@ struct MenuBarView: View {
                 label: "Tokens",
                 remaining: manager.tokensRemaining,
                 limit: manager.tokensLimit,
-                percent: manager.tokensPercent
+                percent: manager.tokensPercent,
+                level: manager.tokensLevel
             )
 
             UsageBar(
                 label: "Requests",
                 remaining: manager.requestsRemaining,
                 limit: manager.requestsLimit,
-                percent: manager.requestsPercent
+                percent: manager.requestsPercent,
+                level: manager.requestsLevel
             )
 
             Divider()
 
-            // Reset countdown
             HStack(spacing: 6) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 10))
@@ -246,7 +238,6 @@ struct MenuBarView: View {
                 Text(manager.timeUntilReset)
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
 
-                // Auto-refresh indicator
                 if manager.refreshInterval != .off {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 8))
@@ -320,7 +311,7 @@ struct MenuBarView: View {
 
             Spacer()
 
-            Text("v1.1")
+            Text("v\(UsageManager.currentVersion)")
                 .font(.system(size: 9))
                 .foregroundColor(.secondary.opacity(0.5))
 
@@ -358,28 +349,19 @@ struct UsageBar: View {
     let remaining: Int
     let limit: Int
     let percent: Double
-
-    private var barColor: Color {
-        if percent > 50 { return .green }
-        if percent > 20 { return .orange }
-        return .red
-    }
+    let level: UsageLevel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            // Label row
             HStack(alignment: .firstTextBaseline) {
                 Text(label)
                     .font(.system(size: 11, weight: .semibold))
-
                 Spacer()
-
                 Text("\(Int(percent))%")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundColor(barColor)
+                    .foregroundColor(level.color)
             }
 
-            // Progress bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 3)
@@ -388,7 +370,7 @@ struct UsageBar: View {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(
                             LinearGradient(
-                                colors: [barColor.opacity(0.8), barColor],
+                                colors: [level.color.opacity(0.8), level.color],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
@@ -399,17 +381,9 @@ struct UsageBar: View {
             }
             .frame(height: 6)
 
-            // Detail
-            Text("\(formatNumber(remaining)) / \(formatNumber(limit))")
+            Text("\(Formatters.formatNumber(remaining)) / \(Formatters.formatNumber(limit))")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.secondary)
         }
-    }
-
-    private func formatNumber(_ n: Int) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.groupingSeparator = ","
-        return formatter.string(from: NSNumber(value: n)) ?? "\(n)"
     }
 }

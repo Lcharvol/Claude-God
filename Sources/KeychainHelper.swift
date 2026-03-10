@@ -1,6 +1,5 @@
 // KeychainHelper.swift
 // Stockage sécurisé de la clé API dans le Keychain macOS
-// Le Keychain est chiffré par le système — bien plus sûr que UserDefaults
 
 import Foundation
 import Security
@@ -10,10 +9,10 @@ enum KeychainHelper {
     private static let service = "com.lcharvol.claude-god"
 
     /// Sauvegarder une valeur dans le Keychain
-    static func save(key: String, value: String) {
-        guard let data = value.data(using: .utf8) else { return }
+    @discardableResult
+    static func save(key: String, value: String) -> Bool {
+        guard let data = value.data(using: .utf8) else { return false }
 
-        // Supprimer l'ancienne valeur si elle existe
         delete(key: key)
 
         let query: [String: Any] = [
@@ -23,7 +22,8 @@ enum KeychainHelper {
             kSecValueData as String: data
         ]
 
-        SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        return status == errSecSuccess
     }
 
     /// Lire une valeur depuis le Keychain
@@ -47,13 +47,15 @@ enum KeychainHelper {
     }
 
     /// Supprimer une valeur du Keychain
-    static func delete(key: String) {
+    @discardableResult
+    static func delete(key: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key
         ]
 
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 }

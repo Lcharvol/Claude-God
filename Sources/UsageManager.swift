@@ -3,6 +3,7 @@
 
 import Foundation
 import Combine
+import SwiftUI
 import UserNotifications
 import ServiceManagement
 
@@ -37,33 +38,85 @@ enum APIKeySource: String {
     case environment = "ANTHROPIC_API_KEY"
 }
 
+// MARK: - Seuils de couleur partagés
+
+enum UsageLevel {
+    case good, warning, critical
+
+    init(percent: Double) {
+        if percent > 50 { self = .good }
+        else if percent > 20 { self = .warning }
+        else { self = .critical }
+    }
+
+    var color: Color {
+        switch self {
+        case .good: return .green
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
+}
+
+// MARK: - Formatters statiques (évite les allocations répétées)
+
+enum Formatters {
+    static let resetDate: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    static let number: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = ","
+        return f
+    }()
+
+    static func formatNumber(_ n: Int) -> String {
+        number.string(from: NSNumber(value: n)) ?? "\(n)"
+    }
+
+    static func formatCompact(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
+    }
+}
+
 // MARK: - Manager principal
 
+@MainActor
 class UsageManager: ObservableObject {
 
     // MARK: - Données d'utilisation
 
-    @Published var tokensRemaining: Int = 0
-    @Published var tokensLimit: Int = 0
-    @Published var requestsRemaining: Int = 0
-    @Published var requestsLimit: Int = 0
-    @Published var resetTime: Date? = nil
-    @Published var isLoading: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var lastRefresh: Date? = nil
+    @Published var tokensRemaining = 0
+    @Published var tokensLimit = 0
+    @Published var requestsRemaining = 0
+    @Published var requestsLimit = 0
+    @Published var resetTime: Date?
+    @Published var isLoading = false
+    @Published var errorMessage: String?
+    @Published var lastRefresh: Date?
+    @Published var timeUntilReset: String = "—"
 
     // MARK: - État de l'interface
 
-    @Published var apiKey: String = ""
+    @Published var apiKey = ""
     @Published var apiKeySource: APIKeySource = .manual
-    @Published var showSettings: Bool = false
+    @Published var showSettings = false
 
     // MARK: - Mise à jour
 
-    @Published var updateAvailable: Bool = false
-    @Published var latestVersion: String = ""
-    @Published var downloadURL: URL? = nil
-    static let currentVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+    @Published var updateAvailable = false
+    @Published var latestVersion = ""
+    @Published var downloadURL: URL?
+
+    static let currentVersion: String = Bundle.main.object(
+        forInfoDictionaryKey: "CFBundleShortVersionString"
+    ) as? String ?? "1.0.0"
 
     // MARK: - Préférences
 
@@ -94,12 +147,34 @@ class UsageManager: ObservableObject {
         }
     }
 
+    // MARK: - Propriétés calculées
+
+    var tokensPercent: Double {
+        guard tokensLimit > 0 else { return 0 }
+        return Double(tokensRemaining) / Double(tokensLimit) * 100
+    }
+
+    var requestsPercent: Double {
+        guard requestsLimit > 0 else { return 0 }
+        return Double(requestsRemaining) / Double(requestsLimit) * 100
+    }
+
+    var tokensLevel: UsageLevel { UsageLevel(percent: tokensPercent) }
+    var requestsLevel: UsageLevel { UsageLevel(percent: requestsPercent) }
+
+    var menuBarTitle: String {
+        guard tokensLimit > 0 else { return "—" }
+        return "\(Int(tokensPercent))%"
+    }
+
     // MARK: - Timers
 
     private var countdownTimer: AnyCancellable?
     private var autoRefreshTimer: AnyCancellable?
-    private var resetCheckTimer: AnyCancellable?
-    private var hasNotifiedLowUsage: Bool = false
+    private var hasNotifiedLowUsage = false
+
+    /// Cooldown minimum entre deux refresh automatiques (secondes)
+    private let autoRefreshCooldown: TimeInterval = 30
 
     // MARK: - Initialisation
 
@@ -120,69 +195,28 @@ class UsageManager: ObservableObject {
         countdownTimer = Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
-                self?.objectWillChange.send()
+                self?.updateCountdown()
                 self?.checkResetExpired()
             }
 
-        // Configurer l'auto-refresh
         setupAutoRefresh()
 
-        // Demander les permissions de notification
         if notificationsEnabled {
             requestNotificationPermission()
         }
 
-        // Rafraîchir au lancement si on a une clé
         if !apiKey.isEmpty {
             refresh()
         }
 
-        // Vérifier les mises à jour
         checkForUpdates()
-    }
-
-    // MARK: - Propriétés calculées
-
-    var tokensPercent: Double {
-        guard tokensLimit > 0 else { return 0 }
-        return Double(tokensRemaining) / Double(tokensLimit) * 100
-    }
-
-    var requestsPercent: Double {
-        guard requestsLimit > 0 else { return 0 }
-        return Double(requestsRemaining) / Double(requestsLimit) * 100
-    }
-
-    var menuBarTitle: String {
-        guard tokensLimit > 0 else { return "—" }
-        return "\(Int(tokensPercent))%"
-    }
-
-    var timeUntilReset: String {
-        guard let reset = resetTime else { return "—" }
-        let remaining = reset.timeIntervalSinceNow
-        if remaining <= 0 { return "now" }
-        let hours = Int(remaining) / 3600
-        let minutes = (Int(remaining) % 3600) / 60
-        let seconds = Int(remaining) % 60
-        if hours > 0 {
-            return "\(hours)h \(minutes)m \(seconds)s"
-        }
-        return "\(minutes)m \(seconds)s"
-    }
-
-    /// Couleur selon le niveau d'utilisation (pour l'icône menu bar)
-    var statusColor: String {
-        if tokensLimit == 0 { return "secondary" }
-        if tokensPercent > 50 { return "green" }
-        if tokensPercent > 20 { return "orange" }
-        return "red"
     }
 
     // MARK: - Actions
 
     func saveAPIKey() {
         KeychainHelper.save(key: "apiKey", value: apiKey)
+        apiKeySource = .keychain
     }
 
     func clearAPIKey() {
@@ -196,9 +230,11 @@ class UsageManager: ObservableObject {
         lastRefresh = nil
         errorMessage = nil
         hasNotifiedLowUsage = false
+        timeUntilReset = "—"
     }
 
     func refresh() {
+        guard !isLoading else { return }
         guard !apiKey.isEmpty else {
             errorMessage = "API key missing"
             return
@@ -235,29 +271,44 @@ class UsageManager: ObservableObject {
                     return
                 }
 
-                if httpResponse.statusCode == 401 {
+                switch httpResponse.statusCode {
+                case 401:
                     self?.errorMessage = "Invalid API key"
-                    return
-                }
-
-                if httpResponse.statusCode == 403 {
+                case 403:
                     self?.errorMessage = "Access denied"
-                    return
-                }
-
-                if httpResponse.statusCode == 429 {
+                case 429:
                     self?.errorMessage = "Rate limited — try again later"
-                    // On parse quand même les headers car ils sont présents sur les 429
                     self?.parseRateLimitHeaders(httpResponse)
                     self?.lastRefresh = Date()
-                    return
+                default:
+                    self?.parseRateLimitHeaders(httpResponse)
+                    self?.lastRefresh = Date()
+                    self?.checkLowUsageNotification()
                 }
-
-                self?.parseRateLimitHeaders(httpResponse)
-                self?.lastRefresh = Date()
-                self?.checkLowUsageNotification()
             }
         }.resume()
+    }
+
+    // MARK: - Countdown
+
+    /// Met à jour le texte du compte à rebours (appelé chaque seconde)
+    private func updateCountdown() {
+        guard let reset = resetTime else {
+            if timeUntilReset != "—" { timeUntilReset = "—" }
+            return
+        }
+        let remaining = reset.timeIntervalSinceNow
+        if remaining <= 0 {
+            timeUntilReset = "now"
+            return
+        }
+        let hours = Int(remaining) / 3600
+        let minutes = (Int(remaining) % 3600) / 60
+        let seconds = Int(remaining) % 60
+        let newValue = hours > 0
+            ? "\(hours)h \(minutes)m \(seconds)s"
+            : "\(minutes)m \(seconds)s"
+        if timeUntilReset != newValue { timeUntilReset = newValue }
     }
 
     // MARK: - Auto-refresh
@@ -279,15 +330,17 @@ class UsageManager: ObservableObject {
         }
     }
 
-    /// Vérifie si le reset est passé et rafraîchit automatiquement
+    /// Vérifie si le reset est passé et rafraîchit automatiquement (avec cooldown)
     private func checkResetExpired() {
-        guard let reset = resetTime else { return }
-        if reset.timeIntervalSinceNow <= 0 && lastRefresh != nil {
-            // Le reset vient d'expirer — rafraîchir pour avoir les nouvelles limites
-            resetTime = nil
-            hasNotifiedLowUsage = false
-            refresh()
-        }
+        guard let reset = resetTime, lastRefresh != nil else { return }
+        guard reset.timeIntervalSinceNow <= 0 else { return }
+
+        // Cooldown : évite une boucle si le serveur renvoie un resetTime dans le passé
+        if let last = lastRefresh, Date().timeIntervalSince(last) < autoRefreshCooldown { return }
+
+        resetTime = nil
+        hasNotifiedLowUsage = false
+        refresh()
     }
 
     // MARK: - Notifications
@@ -297,8 +350,7 @@ class UsageManager: ObservableObject {
     }
 
     private func checkLowUsageNotification() {
-        guard notificationsEnabled else { return }
-        guard tokensLimit > 0 else { return }
+        guard notificationsEnabled, tokensLimit > 0 else { return }
         guard tokensPercent <= notificationThreshold else {
             hasNotifiedLowUsage = false
             return
@@ -309,7 +361,7 @@ class UsageManager: ObservableObject {
 
         let content = UNMutableNotificationContent()
         content.title = "Claude God"
-        content.body = "Tokens remaining: \(Int(tokensPercent))% (\(formatCompact(tokensRemaining)) left)"
+        content.body = "Tokens remaining: \(Int(tokensPercent))% (\(Formatters.formatCompact(tokensRemaining)) left)"
         content.sound = .default
 
         let request = UNNotificationRequest(
@@ -323,16 +375,14 @@ class UsageManager: ObservableObject {
     // MARK: - Launch at Login
 
     private func updateLoginItem() {
-        if #available(macOS 13.0, *) {
-            do {
-                if launchAtLogin {
-                    try SMAppService.mainApp.register()
-                } else {
-                    try SMAppService.mainApp.unregister()
-                }
-            } catch {
-                // Silently ignore — user may not have granted permission
+        do {
+            if launchAtLogin {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
             }
+        } catch {
+            // Silently ignore — user may not have granted permission
         }
     }
 
@@ -352,21 +402,12 @@ class UsageManager: ObservableObject {
             requestsRemaining = Int(value) ?? 0
         }
         if let value = response.value(forHTTPHeaderField: "anthropic-ratelimit-tokens-reset") {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            resetTime = formatter.date(from: value)
+            resetTime = Formatters.resetDate.date(from: value)
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Migration & Auto-détection
 
-    private func formatCompact(_ n: Int) -> String {
-        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
-        return "\(n)"
-    }
-
-    /// Migre la clé API depuis UserDefaults (ancien stockage) vers Keychain
     private func migrateAPIKeyFromUserDefaults() {
         if apiKey.isEmpty, let oldKey = UserDefaults.standard.string(forKey: "anthropicAPIKey"), !oldKey.isEmpty {
             apiKey = oldKey
@@ -376,16 +417,15 @@ class UsageManager: ObservableObject {
         }
     }
 
-    /// Auto-détection de la clé API depuis le fichier Anthropic CLI ou l'env var
     private func autoDetectAPIKey() {
         guard apiKey.isEmpty else {
             apiKeySource = .keychain
             return
         }
 
-        // 1. Chercher dans ~/.anthropic/api_key (fichier du CLI Anthropic)
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let filePath = home.appendingPathComponent(".anthropic/api_key")
+        // 1. Fichier ~/.anthropic/api_key (CLI Anthropic)
+        let filePath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".anthropic/api_key")
         if let fileKey = try? String(contentsOf: filePath, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !fileKey.isEmpty {
@@ -395,7 +435,7 @@ class UsageManager: ObservableObject {
             return
         }
 
-        // 2. Chercher la variable d'environnement ANTHROPIC_API_KEY
+        // 2. Variable d'environnement ANTHROPIC_API_KEY
         if let envKey = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"],
            !envKey.isEmpty {
             apiKey = envKey
@@ -407,7 +447,6 @@ class UsageManager: ObservableObject {
 
     // MARK: - Mise à jour automatique
 
-    /// Vérifie sur GitHub si une nouvelle version est disponible
     func checkForUpdates() {
         guard let url = URL(string: "https://api.github.com/repos/Lcharvol/Claude-God/releases/latest") else { return }
 
@@ -421,25 +460,23 @@ class UsageManager: ObservableObject {
                   let assets = json["assets"] as? [[String: Any]] else { return }
 
             let remoteVersion = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-            let currentVersion = UsageManager.currentVersion
 
             DispatchQueue.main.async {
-                if self?.isNewer(remote: remoteVersion, current: currentVersion) == true {
-                    self?.latestVersion = remoteVersion
-                    self?.updateAvailable = true
+                guard Self.isNewer(remote: remoteVersion, current: Self.currentVersion) else { return }
 
-                    // Trouver l'URL du DMG dans les assets
-                    if let dmgAsset = assets.first(where: { ($0["name"] as? String)?.hasSuffix(".dmg") == true }),
-                       let urlString = dmgAsset["browser_download_url"] as? String {
-                        self?.downloadURL = URL(string: urlString)
-                    }
+                self?.latestVersion = remoteVersion
+                self?.updateAvailable = true
+
+                if let dmgAsset = assets.first(where: { ($0["name"] as? String)?.hasSuffix(".dmg") == true }),
+                   let urlString = dmgAsset["browser_download_url"] as? String {
+                    self?.downloadURL = URL(string: urlString)
                 }
             }
         }.resume()
     }
 
     /// Compare deux versions semver (ex: "1.2.0" > "1.1.0")
-    private func isNewer(remote: String, current: String) -> Bool {
+    static func isNewer(remote: String, current: String) -> Bool {
         let r = remote.split(separator: ".").compactMap { Int($0) }
         let c = current.split(separator: ".").compactMap { Int($0) }
         for i in 0..<max(r.count, c.count) {
@@ -451,7 +488,6 @@ class UsageManager: ObservableObject {
         return false
     }
 
-    /// Télécharge et installe la mise à jour
     func installUpdate() {
         guard let url = downloadURL else { return }
         NSWorkspace.shared.open(url)

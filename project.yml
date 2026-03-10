@@ -14,6 +14,9 @@ targets:
       - path: Sources
         excludes:
           - "*.entitlements"
+          - "Info.plist"
+    info:
+      path: Sources/Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lcharvol.claude-god
@@ -22,8 +25,7 @@ targets:
         CURRENT_PROJECT_VERSION: "2"
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "13.0"
-        INFOPLIST_KEY_LSUIElement: true
-        INFOPLIST_KEY_CFBundleDisplayName: "Claude God"
+        GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         ENABLE_HARDENED_RUNTIME: true

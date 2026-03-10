@@ -56,7 +56,7 @@ cd Claude-God
    - Interface: **SwiftUI**
    - Language: **Swift**
 4. Save anywhere, then **delete** the generated `ContentView.swift` and `ClaudeUsageApp.swift`
-5. Drag the 3 files from `ClaudeUsage/` into the Xcode project navigator
+5. Drag the 3 `.swift` files from the repo root into the Xcode project navigator
    - Check **"Copy items if needed"**
    - Check **"Add to target: ClaudeUsage"**
 
@@ -81,10 +81,11 @@ Click the icon → paste your Anthropic API key → **Save**. Done.
 ## Project structure
 
 ```
-ClaudeUsage/
+Claude-God/
 ├── ClaudeUsageApp.swift   # App entry point, MenuBarExtra setup
 ├── UsageManager.swift     # API calls, data management, state
-└── MenuBarView.swift      # UI: popover with usage bars and controls
+├── MenuBarView.swift      # UI: popover with usage bars and controls
+└── README.md
 ```
 
 | File | Lines | Role |

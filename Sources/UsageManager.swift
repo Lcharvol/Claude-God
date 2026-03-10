@@ -156,6 +156,12 @@ class UsageManager: ObservableObject {
         }
     }
 
+    @Published var compactMode: Bool {
+        didSet {
+            UserDefaults.standard.set(compactMode, forKey: "compactMode")
+        }
+    }
+
     // MARK: - Propriétés calculées
 
     /// Le quota le plus "urgent" (le plus utilisé) pour afficher dans la menu bar
@@ -166,6 +172,20 @@ class UsageManager: ObservableObject {
     var menuBarTitle: String {
         guard let q = primaryQuota else { return "—" }
         return "\(Int(q.utilization))%"
+    }
+
+    var menuBarIcon: String {
+        guard let q = primaryQuota else { return "c.circle" }
+        switch q.level {
+        case .critical: return "c.circle.fill"
+        case .warning: return "c.circle.fill"
+        case .good: return "c.circle"
+        }
+    }
+
+    var menuBarIconColor: Color {
+        guard let q = primaryQuota else { return .primary }
+        return q.level.color
     }
 
     /// Le prochain reset parmi tous les quotas
@@ -201,6 +221,7 @@ class UsageManager: ObservableObject {
         self.notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
         self.notificationThreshold = UserDefaults.standard.object(forKey: "notificationThreshold") as? Double ?? 20.0
         self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
+        self.compactMode = UserDefaults.standard.bool(forKey: "compactMode")
 
         loadCredentials()
 
@@ -691,5 +712,68 @@ class UsageManager: ObservableObject {
     func installUpdate() {
         guard let url = downloadURL else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - Copy & Export
+
+    func copyStatsToClipboard() -> Bool {
+        var lines: [String] = ["Claude God — Usage Stats"]
+        lines.append("")
+
+        if !quotas.isEmpty {
+            lines.append("── Quotas ──")
+            for q in quotas {
+                lines.append("\(q.label): \(Int(q.utilization))% used")
+            }
+            lines.append("")
+        }
+
+        let fmt: (Double) -> String = { cost in
+            cost >= 0.01 ? String(format: "$%.2f", cost) : String(format: "$%.3f", cost)
+        }
+
+        lines.append("── Cost (JSONL) ──")
+        lines.append("Today: \(fmt(todayStats.totalCost)) (\(todayStats.totalMessages) msgs)")
+        lines.append("7 days: \(fmt(weekStats.totalCost)) (\(weekStats.totalMessages) msgs)")
+        lines.append("30 days: \(fmt(monthStats.totalCost)) (\(monthStats.totalMessages) msgs)")
+
+        if !monthStats.byModel.isEmpty {
+            lines.append("")
+            lines.append("── Models (30d) ──")
+            for m in monthStats.byModel {
+                lines.append("\(m.shortName): \(fmt(m.cost))")
+            }
+        }
+
+        NSPasteboard.general.clearContents()
+        return NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+    }
+
+    func exportCSV() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "claude-usage-\(dateStamp()).csv"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        var csv = "Date,Cost,Messages,Input Tokens,Output Tokens,Cache Create,Cache Read\n"
+        for day in monthStats.daily.reversed() {
+            let dateStr = {
+                let f = DateFormatter()
+                f.dateFormat = "yyyy-MM-dd"
+                return f.string(from: day.date)
+            }()
+            csv += "\(dateStr),\(String(format: "%.4f", day.cost)),\(day.messageCount),"
+            csv += "\(day.tokens.inputTokens),\(day.tokens.outputTokens),"
+            csv += "\(day.tokens.cacheCreationTokens),\(day.tokens.cacheReadTokens)\n"
+        }
+
+        try? csv.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func dateStamp() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
     }
 }

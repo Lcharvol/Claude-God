@@ -7,6 +7,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var manager: UsageManager
+    @State private var copiedFeedback = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,7 +33,11 @@ struct MenuBarView: View {
                 } else if let error = manager.errorMessage {
                     errorView(error)
                 } else if !manager.quotas.isEmpty {
-                    usageView
+                    if manager.compactMode {
+                        compactUsageView
+                    } else {
+                        usageView
+                    }
                 } else {
                     emptyView
                 }
@@ -47,7 +52,7 @@ struct MenuBarView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
         }
-        .frame(width: 340)
+        .frame(width: manager.compactMode && !manager.showSettings && !manager.showStats ? 260 : 340)
     }
 
     // MARK: - Header
@@ -268,6 +273,14 @@ struct MenuBarView: View {
                 }
             }
 
+            SettingsSection(title: "Display", icon: "rectangle.on.rectangle") {
+                Toggle("Compact mode", isOn: $manager.compactMode)
+                    .font(.system(size: 12))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .tint(.purple)
+            }
+
             SettingsSection(title: "System", icon: "laptopcomputer") {
                 Toggle("Launch at login", isOn: $manager.launchAtLogin)
                     .font(.system(size: 12))
@@ -278,7 +291,7 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Usage
+    // MARK: - Usage (full)
 
     private var usageView: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -314,6 +327,39 @@ struct MenuBarView: View {
         }
     }
 
+    // MARK: - Usage (compact)
+
+    private var compactUsageView: some View {
+        VStack(spacing: 6) {
+            ForEach(manager.quotas) { quota in
+                HStack(spacing: 8) {
+                    Image(systemName: quota.icon)
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .frame(width: 12)
+                    Text(quota.label)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                    Spacer()
+                    Text("\(Int(quota.utilization))%")
+                        .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                        .foregroundColor(quota.level.color)
+                }
+            }
+
+            HStack(spacing: 4) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(manager.timeUntilReset)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, 2)
+        }
+    }
+
     // MARK: - Stats view
 
     private var statsView: some View {
@@ -323,6 +369,21 @@ struct MenuBarView: View {
                 CostCard(label: "Today", cost: manager.todayStats.totalCost, messages: manager.todayStats.totalMessages)
                 CostCard(label: "7 days", cost: manager.weekStats.totalCost, messages: manager.weekStats.totalMessages)
                 CostCard(label: "30 days", cost: manager.monthStats.totalCost, messages: manager.monthStats.totalMessages)
+            }
+
+            // Sparkline chart
+            if manager.monthStats.daily.count >= 2 {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("USAGE TREND (7D)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .tracking(0.8)
+
+                    SparklineView(
+                        data: Array(manager.monthStats.daily.prefix(7).reversed().map(\.cost))
+                    )
+                    .frame(height: 40)
+                }
             }
 
             // Model breakdown
@@ -371,6 +432,52 @@ struct MenuBarView: View {
                         }
                     }
                 }
+            }
+
+            // Action buttons
+            HStack(spacing: 8) {
+                Button(action: {
+                    if manager.copyStatsToClipboard() {
+                        copiedFeedback = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            copiedFeedback = false
+                        }
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: copiedFeedback ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(copiedFeedback ? "Copied!" : "Copy")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(copiedFeedback ? Color.green.opacity(0.12) : Color.primary.opacity(0.06))
+                    )
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(copiedFeedback ? .green : .secondary)
+
+                Button(action: { manager.exportCSV() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Export CSV")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.primary.opacity(0.06))
+                    )
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+
+                Spacer()
             }
         }
     }
@@ -638,5 +745,64 @@ struct DailyBar: View {
             }
         }
         .frame(height: 6)
+    }
+}
+
+// MARK: - Sparkline component
+
+struct SparklineView: View {
+    let data: [Double]
+
+    var body: some View {
+        GeometryReader { geo in
+            let maxVal = data.max() ?? 1
+            let minVal = data.min() ?? 0
+            let range = max(maxVal - minVal, 0.001)
+            let stepX = geo.size.width / CGFloat(max(data.count - 1, 1))
+            let points: [CGPoint] = data.enumerated().map { i, val in
+                let x = CGFloat(i) * stepX
+                let y = geo.size.height - (CGFloat((val - minVal) / range) * (geo.size.height - 4)) - 2
+                return CGPoint(x: x, y: y)
+            }
+
+            ZStack {
+                // Fill area
+                if points.count >= 2 {
+                    Path { path in
+                        path.move(to: CGPoint(x: points[0].x, y: geo.size.height))
+                        path.addLine(to: points[0])
+                        for i in 1..<points.count {
+                            path.addLine(to: points[i])
+                        }
+                        path.addLine(to: CGPoint(x: points.last!.x, y: geo.size.height))
+                        path.closeSubpath()
+                    }
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.purple.opacity(0.2), Color.purple.opacity(0.02)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+
+                    // Line
+                    Path { path in
+                        path.move(to: points[0])
+                        for i in 1..<points.count {
+                            path.addLine(to: points[i])
+                        }
+                    }
+                    .stroke(Color.purple, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                }
+
+                // Dots
+                ForEach(Array(points.enumerated()), id: \.offset) { _, point in
+                    Circle()
+                        .fill(Color.purple)
+                        .frame(width: 4, height: 4)
+                        .position(point)
+                }
+            }
+        }
     }
 }

@@ -12,7 +12,9 @@ struct ClaudeGodApp: App {
             MenuBarView(manager: manager)
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "c.circle")
+                Image(systemName: manager.menuBarIcon)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(manager.menuBarIconColor)
                 Text(manager.menuBarTitle)
                     .monospacedDigit()
             }

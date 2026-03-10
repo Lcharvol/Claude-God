@@ -217,7 +217,7 @@ class UsageManager: ObservableObject {
 
     init() {
         let savedInterval = UserDefaults.standard.integer(forKey: "refreshInterval")
-        self.refreshInterval = RefreshInterval(rawValue: savedInterval) ?? .fiveMin
+        self.refreshInterval = RefreshInterval(rawValue: savedInterval) ?? .twoMin
         self.notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
         self.notificationThreshold = UserDefaults.standard.object(forKey: "notificationThreshold") as? Double ?? 20.0
         self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")

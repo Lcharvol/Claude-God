@@ -1,46 +1,73 @@
-# Claude God
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/Lcharvol/Claude-God?style=flat-square&color=8b6cf6&label=latest" alt="Release">
+  <img src="https://img.shields.io/badge/macOS-13%2B-black?style=flat-square" alt="macOS 13+">
+  <img src="https://img.shields.io/badge/Swift-5.9-F05138?style=flat-square" alt="Swift 5.9">
+  <img src="https://img.shields.io/github/license/Lcharvol/Claude-God?style=flat-square&color=34d399" alt="MIT License">
+  <a href="https://github.com/Lcharvol/Claude-God/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Lcharvol/Claude-God/ci.yml?style=flat-square&label=CI" alt="CI"></a>
+</p>
 
-A lightweight macOS menu bar app that monitors your Claude usage quotas in real time. Works with **Pro** and **Max** plans — no API credits needed.
+<h1 align="center">
+  Claude God
+</h1>
 
-[![CI](https://github.com/Lcharvol/Claude-God/actions/workflows/ci.yml/badge.svg)](https://github.com/Lcharvol/Claude-God/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Lcharvol/Claude-God)](https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg)
-![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue)
-![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+<p align="center">
+  <strong>Monitor your Claude AI usage from the macOS menu bar.</strong><br>
+  Circular gauges, cost analytics, sparkline charts, CSV export.<br>
+  Free, open source, zero dependencies.
+</p>
 
-## Download
+<p align="center">
+  <a href="https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg"><strong>Download .dmg</strong></a> &nbsp;&middot;&nbsp;
+  <a href="https://claudegod.app">Website</a> &nbsp;&middot;&nbsp;
+  <a href="https://github.com/Lcharvol/Claude-God/releases">Changelog</a>
+</p>
 
-**[Download the latest .dmg](https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg)** — no Xcode required.
-
-1. Open the `.dmg`, drag **Claude God** to Applications
-2. First launch — open Terminal and run:
-   ```bash
-   xattr -cr /Applications/Claude\ God.app
-   ```
-   *(required once because the app is not notarized)*
-3. Make sure you're logged in to Claude Code:
-   ```bash
-   claude login
-   ```
-4. Launch the app — a `C` icon appears in the menu bar
+---
 
 ## Features
 
-- **No API key needed** — uses your existing `claude login` credentials
-- **Works with Pro & Max** — detects your subscription type automatically
-- **Multiple quotas** — session (5h), weekly (7d), per-model (Sonnet, Opus)
-- **Menu bar native** — always visible, no dock icon, no window
-- **Auto-refresh** — configurable interval (1, 2, 5, 10 min or off)
-- **Live countdown** — see exactly when quotas reset
-- **Color-coded bars** — green/orange/red at a glance
-- **Notifications** — alert when usage gets high
-- **Launch at login** — start automatically with your Mac
-- **Completely free** — no API credits, no billing, zero cost
-- **Fully private** — no server, no telemetry, no tracking
+| | Feature | Description |
+|---|---|---|
+| **Quotas** | Circular gauges | Animated ring gauges for session (5h), weekly, Sonnet & Opus quotas |
+| | Dynamic icon | Menu bar icon turns green/orange/red based on usage level |
+| | Live countdown | Real-time timer showing when quotas reset |
+| **Analytics** | Cost tracking | Daily, weekly, monthly cost breakdown from JSONL session files |
+| | Sparkline chart | 7-day usage trend with smooth Bezier curves |
+| | Model breakdown | Per-model cost and token usage (Opus, Sonnet, Haiku) |
+| | Export CSV | Save daily cost & token data as CSV |
+| | Copy stats | One-click copy of formatted stats to clipboard |
+| **Settings** | Auto-refresh | Configurable interval (1, 2, 5, 10 min) |
+| | Compact mode | Minimal UI showing just percentages |
+| | Notifications | Alert when usage exceeds configurable threshold |
+| | Launch at login | Start automatically with macOS |
+| **Design** | Glass cards | Modern UI with hover effects, animated transitions |
+| | Dark & Light | Adapts to system appearance automatically |
 
-## How it works
+> **No API key needed.** Uses your existing `claude login` credentials. Works with Pro & Max plans. Completely free.
 
-The app reads your OAuth credentials from `claude login` (stored in macOS Keychain or `~/.claude/.credentials.json`) and calls Anthropic's usage API:
+---
+
+## Quick Start
+
+```bash
+# 1. Download & install
+open https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg
+
+# 2. Allow unsigned app (required once)
+xattr -cr /Applications/Claude\ God.app
+
+# 3. Make sure you're logged in
+claude login
+
+# 4. Launch — a "C" icon appears in the menu bar
+open /Applications/Claude\ God.app
+```
+
+---
+
+## How It Works
+
+**Quotas** — The app reads your OAuth credentials from `claude login` (Keychain or `~/.claude/.credentials.json`) and calls:
 
 ```
 GET https://api.anthropic.com/api/oauth/usage
@@ -48,72 +75,55 @@ Authorization: Bearer <oauth_token>
 anthropic-beta: oauth-2025-04-20
 ```
 
-This returns your quota utilization for each window:
+Returns utilization for each quota window (`five_hour`, `seven_day`, `seven_day_sonnet`, `seven_day_opus`). Tokens are refreshed automatically.
 
-| Field | Info |
-|---|---|
-| `five_hour.utilization` | Session usage (resets every 5h) |
-| `seven_day.utilization` | Weekly usage (all models) |
-| `seven_day_sonnet.utilization` | Sonnet-specific weekly usage |
-| `seven_day_opus.utilization` | Opus-specific weekly usage |
+**Cost Analytics** — Parses all `~/.claude/projects/**/*.jsonl` session files to calculate costs per model using Anthropic's published pricing.
 
-OAuth tokens are automatically refreshed when they expire.
+---
 
-## Build from source
-
-Requires macOS 13+ and Xcode 15+.
+## Build from Source
 
 ```bash
 git clone https://github.com/Lcharvol/Claude-God.git
 cd Claude-God
 brew install xcodegen    # one time
-make build               # or: make open (opens in Xcode)
+make build               # or: make open (Xcode)
 ```
 
-See the [Makefile](Makefile) for all commands: `make build`, `make run`, `make dmg`, `make clean`.
+See [`Makefile`](Makefile) for all commands: `build`, `run`, `dmg`, `clean`.
 
-## Project structure
+## Project Structure
 
 ```
-Claude-God/
-├── Sources/
-│   ├── ClaudeUsageApp.swift       # App entry point, MenuBarExtra
-│   ├── UsageManager.swift         # OAuth API, auto-refresh, notifications
-│   ├── MenuBarView.swift          # UI: quotas, settings, controls
-│   ├── KeychainHelper.swift       # Keychain utilities
-│   └── ClaudeGod.entitlements     # Network permissions
-├── docs/
-│   ├── index.html                 # Landing page (claudegod.app)
-│   └── CNAME                      # Custom domain config
-├── .github/
-│   ├── workflows/
-│   │   ├── ci.yml                 # Build check on push & PRs
-│   │   └── build.yml              # Release: build DMG on tag push
-│   ├── ISSUE_TEMPLATE/            # Bug report & feature request templates
-│   └── pull_request_template.md
-├── project.yml                    # Xcodegen spec
-├── Makefile                       # Build commands
-├── CHANGELOG.md                   # Version history
-└── LICENSE                        # MIT
+Sources/
+├── ClaudeUsageApp.swift     # Entry point, MenuBarExtra
+├── UsageManager.swift       # OAuth, auto-refresh, notifications, export
+├── MenuBarView.swift        # UI: gauges, stats, settings, components
+├── SessionAnalyzer.swift    # JSONL parser, cost calculator
+└── Assets.xcassets/         # App icon
 ```
 
-**Zero external dependencies.** Only Foundation, SwiftUI, Combine, Security, UserNotifications, and ServiceManagement.
+**Zero external dependencies.** Foundation + SwiftUI + Combine + Security + UserNotifications + ServiceManagement.
 
 ## Releasing
 
-Push a tag and GitHub Actions builds the `.dmg` automatically:
-
 ```bash
-git tag v2.0.0
-git push origin v2.0.0
+git tag v2.2.0 && git push origin v2.2.0
+# GitHub Actions builds the .dmg automatically
 ```
 
 ## Roadmap
 
-- [x] Track multiple models (different quotas per model)
-- [ ] Usage history graph
-- [ ] Global keyboard shortcut to open popover
+- [x] Multiple model quotas (Sonnet, Opus, weekly)
+- [x] Cost analytics from JSONL files
+- [x] Sparkline usage chart
+- [x] Export CSV / copy stats
+- [x] Circular gauges UI
+- [x] Dynamic menu bar icon
+- [x] Compact mode
+- [ ] Global keyboard shortcut
 - [ ] Homebrew cask distribution
+- [ ] Usage history persistence
 
 ## License
 

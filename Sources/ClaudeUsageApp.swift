@@ -15,6 +15,11 @@ struct ClaudeGodApp: App {
                 Image(systemName: manager.menuBarIcon)
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(manager.menuBarIconColor)
+                if manager.isSessionActive {
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 5, height: 5)
+                }
                 Text(manager.menuBarTitle)
                     .monospacedDigit()
             }

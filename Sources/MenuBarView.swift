@@ -101,8 +101,21 @@ struct MenuBarView: View {
                 )
 
             VStack(alignment: .leading, spacing: 0) {
-                Text("Claude God")
-                    .font(.system(size: 13, weight: .semibold))
+                HStack(spacing: 5) {
+                    Text("Claude God")
+                        .font(.system(size: 13, weight: .semibold))
+                    if manager.isSessionActive {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 6, height: 6)
+                            .overlay(
+                                Circle()
+                                    .fill(.green.opacity(0.4))
+                                    .frame(width: 10, height: 10)
+                            )
+                            .help("Claude Code is active")
+                    }
+                }
                 if !manager.subscriptionType.isEmpty {
                     Text(manager.subscriptionType.capitalized)
                         .font(.system(size: 10, weight: .medium))
@@ -192,7 +205,6 @@ struct MenuBarView: View {
             SHCard {
                 VStack(alignment: .leading, spacing: 8) {
                     SHLabel("Authentication")
-
                     if manager.isAuthenticated {
                         HStack(spacing: 8) {
                             SHBadge(text: "Connected", color: .green)
@@ -203,9 +215,7 @@ struct MenuBarView: View {
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 6) {
-                                SHBadge(text: "Not connected", color: .orange)
-                            }
+                            SHBadge(text: "Not connected", color: .orange)
                             Text("Run `claude login` in Terminal")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
@@ -260,6 +270,36 @@ struct MenuBarView: View {
                             Slider(value: $manager.notificationThreshold, in: 5...50, step: 5)
                                 .controlSize(.small)
                         }
+                    }
+                }
+            }
+
+            // Daily budget
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    SHLabel("Daily budget")
+                    HStack(spacing: 8) {
+                        Text("$")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                        TextField("0", value: $manager.dailyBudget, format: .number.precision(.fractionLength(0...2)))
+                            .font(.system(size: 12, design: .monospaced))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 70)
+                        Text("/ day")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        if manager.dailyBudget > 0 {
+                            SHButton(label: "Clear", style: .ghost) {
+                                manager.dailyBudget = 0
+                            }
+                        }
+                    }
+                    if manager.dailyBudget > 0 {
+                        Text("Get notified when daily spend approaches your budget")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
                     }
                 }
             }
@@ -324,6 +364,11 @@ struct MenuBarView: View {
                             }
                         }
                     }
+                    HStack(spacing: 8) {
+                        Text("⌘R Refresh · ⌘1 Usage · ⌘2 Analytics")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.secondary.opacity(0.6))
+                    }
                 }
             }
         }
@@ -357,7 +402,6 @@ struct MenuBarView: View {
                             ZStack(alignment: .leading) {
                                 RoundedRectangle(cornerRadius: 3)
                                     .fill(Theme.muted)
-
                                 RoundedRectangle(cornerRadius: 3)
                                     .fill(quota.level.color)
                                     .frame(width: max(0, geo.size.width * CGFloat(min(quota.utilization, 100) / 100)))
@@ -374,6 +418,54 @@ struct MenuBarView: View {
                         }
                     }
                 }
+            }
+
+            // Burn rate prediction
+            if let prediction = manager.burnRatePrediction {
+                HStack(spacing: 6) {
+                    Image(systemName: "gauge.with.needle")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.orange)
+                    Text("At this rate, limit in")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(prediction)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.orange)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                        .strokeBorder(Color.orange.opacity(0.15), lineWidth: 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                                .fill(Color.orange.opacity(0.05))
+                        )
+                )
+            }
+
+            // Model advisor
+            if let tip = manager.modelAdvisorTip {
+                HStack(spacing: 6) {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.yellow)
+                    Text(tip)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                        .strokeBorder(Color.yellow.opacity(0.15), lineWidth: 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                                .fill(Color.yellow.opacity(0.05))
+                        )
+                )
             }
 
             // Reset timer
@@ -410,7 +502,6 @@ struct MenuBarView: View {
                         .foregroundColor(.secondary)
                     Spacer()
 
-                    // Mini bar
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Theme.muted)
@@ -429,6 +520,19 @@ struct MenuBarView: View {
                 .padding(.vertical, 3)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(quota.label), \(Int(quota.utilization)) percent used")
+            }
+
+            if let prediction = manager.burnRatePrediction {
+                SHDivider().padding(.vertical, 2)
+                HStack {
+                    Text("Limit in")
+                        .font(.system(size: 10))
+                        .foregroundColor(.orange)
+                    Spacer()
+                    Text(prediction)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.orange)
+                }
             }
 
             SHDivider().padding(.vertical, 2)
@@ -462,7 +566,6 @@ struct MenuBarView: View {
     private var statsView: some View {
         VStack(spacing: 10) {
             if manager.monthStats.totalMessages == 0 {
-                // Empty state
                 VStack(spacing: 10) {
                     Image(systemName: "chart.bar")
                         .font(.system(size: 24, weight: .medium))
@@ -478,7 +581,7 @@ struct MenuBarView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 20)
             } else {
-                // Cost cards with session count
+                // Cost cards
                 HStack(spacing: 6) {
                     SHStatCard(label: "Today", value: formatCost(manager.todayStats.totalCost), sub: "\(manager.todayStats.totalMessages) msgs")
                     SHStatCard(label: "7 days", value: formatCost(manager.weekStats.totalCost), sub: "\(manager.weekStats.totalMessages) msgs")
@@ -489,7 +592,32 @@ struct MenuBarView: View {
                     )
                 }
 
-                // Sparkline (follows dailyRange)
+                // Daily budget progress
+                if let budgetUtil = manager.budgetUtilization {
+                    SHCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                SHLabel("Daily Budget")
+                                Spacer()
+                                Text("\(formatCost(manager.todayStats.totalCost)) / $\(String(format: "%.0f", manager.dailyBudget))")
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(budgetUtil >= 100 ? .red : budgetUtil >= 80 ? .orange : .secondary)
+                            }
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(Theme.muted)
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(budgetUtil >= 100 ? Color.red : budgetUtil >= 80 ? Color.orange : Theme.accent)
+                                        .frame(width: max(0, geo.size.width * CGFloat(min(budgetUtil, 100) / 100)))
+                                }
+                            }
+                            .frame(height: 4)
+                        }
+                    }
+                }
+
+                // Sparkline
                 if manager.monthStats.daily.count >= 2 {
                     SHCard {
                         VStack(alignment: .leading, spacing: 8) {
@@ -541,6 +669,81 @@ struct MenuBarView: View {
                                 Text(formatCost(manager.monthStats.totalCost))
                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                                     .frame(width: 48, alignment: .trailing)
+                            }
+                        }
+                    }
+                }
+
+                // Projects
+                if !manager.monthStats.byProject.isEmpty {
+                    SHCard {
+                        VStack(alignment: .leading, spacing: 8) {
+                            SHLabel("Projects")
+                            ForEach(manager.monthStats.byProject.prefix(5)) { project in
+                                HStack(spacing: 6) {
+                                    Image(systemName: "folder.fill")
+                                        .font(.system(size: 8, weight: .medium))
+                                        .foregroundColor(Theme.accent.opacity(0.6))
+                                    Text(project.projectName)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text("\(project.totalMessages) msgs")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                    Text(formatCost(project.totalCost))
+                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .frame(width: 48, alignment: .trailing)
+                                }
+                                .help("\(project.projectName): \(project.sessionCount) sessions · \(project.totalMessages) messages · \(formatCost(project.totalCost))")
+                            }
+                        }
+                    }
+                }
+
+                // Recent sessions
+                if !manager.sessionHistory.isEmpty {
+                    SHCard {
+                        VStack(alignment: .leading, spacing: 8) {
+                            SHLabel("Recent Sessions")
+                            ForEach(manager.sessionHistory.prefix(5)) { session in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 4) {
+                                        Text(session.topic)
+                                            .font(.system(size: 10, weight: .medium))
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text(formatCost(session.cost))
+                                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    }
+                                    HStack(spacing: 6) {
+                                        Text(session.projectName)
+                                            .font(.system(size: 9))
+                                            .foregroundColor(Theme.accent.opacity(0.7))
+                                        Text("·")
+                                            .foregroundColor(.secondary.opacity(0.5))
+                                        Text(session.primaryModel)
+                                            .font(.system(size: 9))
+                                            .foregroundColor(.secondary)
+                                        Text("·")
+                                            .foregroundColor(.secondary.opacity(0.5))
+                                        Text(session.durationLabel)
+                                            .font(.system(size: 9))
+                                            .foregroundColor(.secondary)
+                                        Text("·")
+                                            .foregroundColor(.secondary.opacity(0.5))
+                                        Text(session.timeLabel)
+                                            .font(.system(size: 9))
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        Text("\(session.messageCount) msgs")
+                                            .font(.system(size: 9))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                if session.id != manager.sessionHistory.prefix(5).last?.id {
+                                    SHDivider()
+                                }
                             }
                         }
                     }
@@ -1031,20 +1234,17 @@ struct SparklineView: View {
                 if let idx = hoveredIndex, idx < points.count {
                     let pt = points[idx]
 
-                    // Vertical line
                     Path { path in
                         path.move(to: CGPoint(x: pt.x, y: 0))
                         path.addLine(to: CGPoint(x: pt.x, y: geo.size.height))
                     }
                     .stroke(Theme.accent.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
 
-                    // Dot
                     Circle()
                         .fill(Theme.accent)
                         .frame(width: 6, height: 6)
                         .position(pt)
 
-                    // Tooltip
                     VStack(spacing: 1) {
                         if idx < labels.count {
                             Text(labels[idx])
@@ -1063,7 +1263,6 @@ struct SparklineView: View {
                     )
                     .position(x: min(max(pt.x, 25), geo.size.width - 25), y: max(pt.y - 16, 10))
                 } else if let last = points.last {
-                    // Default end dot when not hovering
                     Circle()
                         .fill(Theme.accent)
                         .frame(width: 4, height: 4)

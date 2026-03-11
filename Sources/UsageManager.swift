@@ -185,6 +185,11 @@ class UsageManager: ObservableObject {
     @Published var monthStats = UsageStats()
     @Published var showStats = false
     @Published var isLoadingStats = false
+    @Published var sessionHistory: [SessionInfo] = []
+
+    // MARK: - Active session detection
+
+    @Published var isSessionActive = false
 
     // MARK: - État de l'interface
 
@@ -232,10 +237,21 @@ class UsageManager: ObservableObject {
         }
     }
 
+    @Published var dailyBudget: Double {
+        didSet {
+            UserDefaults.standard.set(dailyBudget, forKey: "dailyBudget")
+        }
+    }
+
     // MARK: - Propriétés calculées
 
     var primaryQuota: UsageQuota? {
         quotas.first(where: { $0.label.contains("Session") }) ?? quotas.first
+    }
+
+    /// The quota with the highest utilization (worst state)
+    private var worstQuota: UsageQuota? {
+        quotas.max(by: { $0.utilization < $1.utilization })
     }
 
     var menuBarTitle: String {
@@ -253,11 +269,6 @@ class UsageManager: ObservableObject {
             if quotas.isEmpty { return "—" }
             return quotas.map { "\(Int($0.utilization))%" }.joined(separator: " | ")
         }
-    }
-
-    /// The quota with the highest utilization (worst state)
-    private var worstQuota: UsageQuota? {
-        quotas.max(by: { $0.utilization < $1.utilization })
     }
 
     var menuBarIcon: String {
@@ -280,6 +291,66 @@ class UsageManager: ObservableObject {
             .min()
     }
 
+    // MARK: - Burn rate prediction
+
+    var burnRatePrediction: String? {
+        guard let sessionQuota = quotas.first(where: { $0.label.contains("Session") }),
+              let resetsAt = sessionQuota.resetsAt,
+              sessionQuota.utilization > 5 else { return nil }
+
+        let windowDuration: TimeInterval = 5 * 3600 // 5-hour window
+        let timeRemaining = resetsAt.timeIntervalSinceNow
+        let timeElapsed = windowDuration - timeRemaining
+
+        guard timeElapsed > 300 else { return nil } // Need at least 5 min of data
+
+        let ratePerSecond = sessionQuota.utilization / timeElapsed
+        guard ratePerSecond > 0 else { return nil }
+
+        let remainingPercent = 100 - sessionQuota.utilization
+        let secondsToLimit = remainingPercent / ratePerSecond
+
+        if secondsToLimit > 24 * 3600 { return nil } // More than a day, not useful
+
+        let hours = Int(secondsToLimit) / 3600
+        let minutes = (Int(secondsToLimit) % 3600) / 60
+
+        if hours > 0 {
+            return "~\(hours)h \(minutes)m"
+        }
+        return "~\(minutes)m"
+    }
+
+    // MARK: - Model advisor
+
+    var modelAdvisorTip: String? {
+        let sonnet = quotas.first(where: { $0.label.contains("Sonnet") })
+        let opus = quotas.first(where: { $0.label.contains("Opus") })
+
+        if let s = sonnet, let o = opus {
+            if s.utilization > 80 && o.utilization < 50 {
+                return "Sonnet quota high — consider using Opus"
+            }
+            if o.utilization > 80 && s.utilization < 50 {
+                return "Opus quota high — consider using Sonnet"
+            }
+        }
+
+        if let session = quotas.first(where: { $0.label.contains("Session") }),
+           session.utilization > 90 {
+            return "Session almost full — pace usage or wait for reset"
+        }
+
+        return nil
+    }
+
+    // MARK: - Daily budget
+
+    var budgetUtilization: Double? {
+        guard dailyBudget > 0 else { return nil }
+        return min((todayStats.totalCost / dailyBudget) * 100, 100)
+    }
+
     // MARK: - Private
 
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
@@ -287,7 +358,11 @@ class UsageManager: ObservableObject {
 
     private var countdownTimer: AnyCancellable?
     private var autoRefreshTimer: AnyCancellable?
+    private var activeSessionTimer: AnyCancellable?
     private var cancellables = Set<AnyCancellable>()
+
+    // Track previous quota utilizations for reset detection
+    private var previousQuotaUtilizations: [String: Double] = [:]
 
     // Multi-threshold notification tracking (persisted)
     private var notifiedThresholds: Set<String> {
@@ -306,6 +381,7 @@ class UsageManager: ObservableObject {
         self.compactMode = UserDefaults.standard.bool(forKey: "compactMode")
         let savedDisplayMode = UserDefaults.standard.integer(forKey: "menuBarDisplayMode")
         self.menuBarDisplayMode = MenuBarDisplayMode(rawValue: savedDisplayMode) ?? .percentageAndTimer
+        self.dailyBudget = UserDefaults.standard.double(forKey: "dailyBudget")
 
         // Forward objectWillChange from sub-managers
         auth.objectWillChange.sink { [weak self] _ in
@@ -331,8 +407,8 @@ class UsageManager: ObservableObject {
         }.store(in: &cancellables)
 
         setupCountdownTimer()
-
         setupAutoRefresh()
+        setupActiveSessionDetection()
 
         if notificationsEnabled {
             requestNotificationPermission()
@@ -359,18 +435,57 @@ class UsageManager: ObservableObject {
             let weekStart = cal.date(byAdding: .day, value: -7, to: now)!
             let monthStart = cal.date(byAdding: .day, value: -30, to: now)!
 
-            // Single pass — scan files once for 30 days, then derive sub-periods
             let month = SessionAnalyzer.analyze(since: monthStart)
             let week = month.filtered(since: weekStart)
             let today = month.filtered(since: todayStart)
+
+            let sessions = SessionAnalyzer.recentSessions(limit: 15)
 
             DispatchQueue.main.async {
                 self?.todayStats = today
                 self?.weekStats = week
                 self?.monthStats = month
+                self?.sessionHistory = sessions
                 self?.isLoadingStats = false
-                print("[ClaudeGod] Stats (single-pass): today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost)) sessions=\(month.sessionCount)")
+                print("[ClaudeGod] Stats: today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost)) projects=\(month.byProject.count) sessions=\(sessions.count)")
             }
+        }
+    }
+
+    // MARK: - Active session detection
+
+    private func setupActiveSessionDetection() {
+        activeSessionTimer = Timer.publish(every: 10, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.checkActiveSession()
+            }
+    }
+
+    private func checkActiveSession() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let fm = FileManager.default
+            let projectsDir = SessionAnalyzer.projectsDir
+            guard let dirs = try? fm.contentsOfDirectory(at: projectsDir, includingPropertiesForKeys: nil) else {
+                DispatchQueue.main.async { self?.isSessionActive = false }
+                return
+            }
+
+            let now = Date()
+            let threshold: TimeInterval = 30
+
+            for dir in dirs {
+                guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }
+                for file in files where file.pathExtension == "jsonl" {
+                    if let attrs = try? fm.attributesOfItem(atPath: file.path),
+                       let modDate = attrs[.modificationDate] as? Date,
+                       now.timeIntervalSince(modDate) < threshold {
+                        DispatchQueue.main.async { self?.isSessionActive = true }
+                        return
+                    }
+                }
+            }
+            DispatchQueue.main.async { self?.isSessionActive = false }
         }
     }
 
@@ -426,7 +541,6 @@ class UsageManager: ObservableObject {
                 guard let self else { return }
 
                 if let error = error {
-                    // Retry on network errors with exponential backoff
                     if retryCount < Self.maxRetries {
                         let delay = pow(2.0, Double(retryCount))
                         print("[ClaudeGod] Network error, retrying in \(Int(delay))s: \(error.localizedDescription)")
@@ -437,7 +551,6 @@ class UsageManager: ObservableObject {
                     }
                     self.isLoading = false
                     self.errorMessage = error.localizedDescription
-                    print("[ClaudeGod] Network error (giving up): \(error.localizedDescription)")
                     return
                 }
 
@@ -459,11 +572,16 @@ class UsageManager: ObservableObject {
                     if let raw = String(data: data, encoding: .utf8) {
                         print("[ClaudeGod] Response: \(raw.prefix(500))")
                     }
+                    // Store previous utilizations for reset detection
+                    for q in self.quotas {
+                        self.previousQuotaUtilizations[q.label] = q.utilization
+                    }
                     self.parseUsageResponse(data)
                     self.isLoading = false
                     self.lastRefresh = Date()
                     self.refreshStats()
                     self.checkNotifications()
+                    self.checkResetNotifications()
 
                 case 401, 403:
                     if self.auth.refreshToken != nil {
@@ -493,7 +611,6 @@ class UsageManager: ObservableObject {
                     }
 
                 default:
-                    // Retry on 5xx errors
                     if httpResponse.statusCode >= 500 && retryCount < Self.maxRetries {
                         let delay = pow(2.0, Double(retryCount))
                         print("[ClaudeGod] Server error \(httpResponse.statusCode), retrying in \(Int(delay))s")
@@ -504,7 +621,6 @@ class UsageManager: ObservableObject {
                     }
                     self.isLoading = false
                     self.errorMessage = "Error \(httpResponse.statusCode)"
-                    print("[ClaudeGod] Error \(httpResponse.statusCode)")
                 }
             }
         }.resume()
@@ -568,7 +684,6 @@ class UsageManager: ObservableObject {
 
     private func setupCountdownTimer() {
         countdownTimer?.cancel()
-        // 1s when timer is visible in menu bar, 30s otherwise (only visible in popover)
         let interval: TimeInterval = menuBarDisplayMode == .percentageAndTimer ? 1 : 30
         countdownTimer = Timer.publish(every: interval, on: .main, in: .common)
             .autoconnect()
@@ -591,13 +706,11 @@ class UsageManager: ObservableObject {
         let minutes = (Int(remaining) % 3600) / 60
         let newValue: String
         if menuBarDisplayMode == .percentageAndTimer {
-            // Show seconds only when timer is visible in menu bar
             let seconds = Int(remaining) % 60
             newValue = hours > 0
                 ? "\(hours)h \(minutes)m \(seconds)s"
                 : "\(minutes)m \(seconds)s"
         } else {
-            // Coarser display for popover-only (updates every 30s)
             newValue = hours > 0
                 ? "\(hours)h \(minutes)m"
                 : "\(minutes)m"
@@ -634,7 +747,6 @@ class UsageManager: ObservableObject {
     private func checkNotifications() {
         guard notificationsEnabled else { return }
 
-        // User-configured threshold (converted from "remaining %" to "used %") + emergency 95%
         let customThreshold = 100 - notificationThreshold
         let thresholds = Array(Set([customThreshold, 95])).sorted()
 
@@ -645,7 +757,6 @@ class UsageManager: ObservableObject {
                 let key = "\(quota.label)-\(Int(threshold))"
 
                 if quota.utilization >= threshold && !updated.contains(key) {
-                    // Send notification
                     let content = UNMutableNotificationContent()
                     content.title = "Claude God"
                     if threshold >= 95 {
@@ -663,13 +774,37 @@ class UsageManager: ObservableObject {
                     UNUserNotificationCenter.current().add(request)
                     updated.insert(key)
                 } else if quota.utilization < threshold {
-                    // Reset notification when utilization drops (after quota reset)
                     updated.remove(key)
                 }
             }
         }
 
         notifiedThresholds = updated
+    }
+
+    // MARK: - Reset notifications
+
+    private func checkResetNotifications() {
+        guard notificationsEnabled else { return }
+
+        for quota in quotas {
+            if let previousUtil = previousQuotaUtilizations[quota.label],
+               previousUtil > 50 && quota.utilization < 10 {
+                // Quota just reset
+                let content = UNMutableNotificationContent()
+                content.title = "Claude God"
+                content.body = "\(quota.label) quota reset — you're back to \(Int(quota.utilization))%"
+                content.sound = .default
+
+                let request = UNNotificationRequest(
+                    identifier: "reset-\(UUID().uuidString)",
+                    content: content,
+                    trigger: nil
+                )
+                UNUserNotificationCenter.current().add(request)
+                print("[ClaudeGod] Reset notification sent for \(quota.label)")
+            }
+        }
     }
 
     // MARK: - Launch at Login
@@ -714,6 +849,14 @@ class UsageManager: ObservableObject {
             lines.append("── Models (30d) ──")
             for m in monthStats.byModel {
                 lines.append("\(m.shortName): \(fmt(m.cost))")
+            }
+        }
+
+        if !monthStats.byProject.isEmpty {
+            lines.append("")
+            lines.append("── Projects (30d) ──")
+            for p in monthStats.byProject {
+                lines.append("\(p.projectName): \(fmt(p.totalCost)) (\(p.totalMessages) msgs)")
             }
         }
 

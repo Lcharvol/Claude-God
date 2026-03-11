@@ -50,7 +50,7 @@ class AuthManager: ObservableObject {
             subscriptionType = oauth["subscriptionType"] as? String ?? ""
             credentialSource = .file
             isAuthenticated = true
-            print("[ClaudeGod] Credentials loaded from file (type: \(subscriptionType))")
+            Log.info("Credentials loaded from file (type: \(subscriptionType))")
             return
         }
 
@@ -64,7 +64,7 @@ class AuthManager: ObservableObject {
             subscriptionType = oauth["subscriptionType"] as? String ?? ""
             credentialSource = .keychain
             isAuthenticated = true
-            print("[ClaudeGod] Credentials loaded from Keychain (type: \(subscriptionType))")
+            Log.info("Credentials loaded from Keychain (type: \(subscriptionType))")
             return
         }
 
@@ -74,13 +74,13 @@ class AuthManager: ObservableObject {
             accessToken = envToken
             credentialSource = .environment
             isAuthenticated = true
-            print("[ClaudeGod] Credentials loaded from environment")
+            Log.info("Credentials loaded from environment")
             return
         }
 
         credentialSource = .none
         isAuthenticated = false
-        print("[ClaudeGod] No credentials found")
+        Log.warn("No credentials found")
     }
 
     // MARK: - Token management
@@ -110,7 +110,7 @@ class AuthManager: ObservableObject {
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        print("[ClaudeGod] Refreshing OAuth token...")
+        Log.info("Refreshing OAuth token...")
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self, let data = data, error == nil,
@@ -119,7 +119,7 @@ class AuthManager: ObservableObject {
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let newToken = json["access_token"] as? String, !newToken.isEmpty
             else {
-                print("[ClaudeGod] Token refresh failed")
+                Log.error("Token refresh failed")
                 DispatchQueue.main.async {
                     self?.isAuthenticated = false
                 }
@@ -135,7 +135,7 @@ class AuthManager: ObservableObject {
                 if let expiresIn = json["expires_in"] as? Int {
                     self.tokenExpiresAt = Date().timeIntervalSince1970 * 1000 + Double(expiresIn) * 1000
                 }
-                print("[ClaudeGod] Token refreshed successfully")
+                Log.info("Token refreshed successfully")
                 self.persistTokens()
                 completion(true)
             }
@@ -160,9 +160,9 @@ class AuthManager: ObservableObject {
 
             let updated = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
             try updated.write(to: Self.credentialsPath, options: .atomic)
-            print("[ClaudeGod] Tokens persisted to credentials file")
+            Log.info("Tokens persisted to credentials file")
         } catch {
-            print("[ClaudeGod] Failed to persist tokens: \(error.localizedDescription)")
+            Log.error("Failed to persist tokens: \(error.localizedDescription)")
         }
     }
 
@@ -187,7 +187,7 @@ class AuthManager: ObservableObject {
                 let wasAuthenticated = self.isAuthenticated
                 self.loadCredentials()
                 if !wasAuthenticated && self.isAuthenticated {
-                    print("[ClaudeGod] Credentials detected via file watcher")
+                    Log.info("Credentials detected via file watcher")
                 }
             }
         }

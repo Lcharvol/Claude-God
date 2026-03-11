@@ -56,7 +56,7 @@ class HotkeyManager {
         )
 
         isRegistered = (status == noErr)
-        print("[ClaudeGod] Global hotkey ⌥⌘C \(isRegistered ? "registered" : "FAILED to register")")
+        Log.info("Global hotkey ⌥⌘C \(isRegistered ? "registered" : "FAILED to register")")
     }
 
     func unregister() {
@@ -75,7 +75,7 @@ class HotkeyManager {
         DispatchQueue.main.async {
             // Find our status item button and click it
             guard let button = findStatusItemButton() else {
-                print("[ClaudeGod] Could not find status item button")
+                Log.info("Could not find status item button")
                 return
             }
             button.performClick(nil)

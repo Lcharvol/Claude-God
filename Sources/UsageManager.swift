@@ -230,7 +230,7 @@ class UsageManager: ObservableObject {
     @Published var projectBudgets: [String: Double] {
         didSet {
             if let data = try? JSONEncoder().encode(projectBudgets) {
-                UserDefaults.standard.set(data, forKey: "projectBudgets")
+                UserDefaults.standard.set(data, forKey: UDKey.projectBudgets)
             }
         }
     }
@@ -240,7 +240,7 @@ class UsageManager: ObservableObject {
     @Published var customAlertRules: [AlertRule] {
         didSet {
             if let data = try? JSONEncoder().encode(customAlertRules) {
-                UserDefaults.standard.set(data, forKey: "customAlertRules")
+                UserDefaults.standard.set(data, forKey: UDKey.customAlertRules)
             }
         }
     }
@@ -250,7 +250,7 @@ class UsageManager: ObservableObject {
     @Published var sessionAnnotations: [String: SessionAnnotation] {
         didSet {
             if let data = try? JSONEncoder().encode(sessionAnnotations) {
-                UserDefaults.standard.set(data, forKey: "sessionAnnotations")
+                UserDefaults.standard.set(data, forKey: UDKey.sessionAnnotations)
             }
         }
     }
@@ -260,13 +260,13 @@ class UsageManager: ObservableObject {
     @Published var accounts: [AccountInfo] {
         didSet {
             if let data = try? JSONEncoder().encode(accounts) {
-                UserDefaults.standard.set(data, forKey: "accounts")
+                UserDefaults.standard.set(data, forKey: UDKey.accounts)
             }
         }
     }
     @Published var activeAccountIndex: Int {
         didSet {
-            UserDefaults.standard.set(activeAccountIndex, forKey: "activeAccountIndex")
+            UserDefaults.standard.set(activeAccountIndex, forKey: UDKey.activeAccountIndex)
         }
     }
 
@@ -287,47 +287,47 @@ class UsageManager: ObservableObject {
 
     @Published var refreshInterval: RefreshInterval {
         didSet {
-            UserDefaults.standard.set(refreshInterval.rawValue, forKey: "refreshInterval")
+            UserDefaults.standard.set(refreshInterval.rawValue, forKey: UDKey.refreshInterval)
             setupAutoRefresh()
         }
     }
 
     @Published var notificationsEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(notificationsEnabled, forKey: "notificationsEnabled")
+            UserDefaults.standard.set(notificationsEnabled, forKey: UDKey.notificationsEnabled)
             if notificationsEnabled { requestNotificationPermission() }
         }
     }
 
     @Published var notificationThreshold: Double {
         didSet {
-            UserDefaults.standard.set(notificationThreshold, forKey: "notificationThreshold")
+            UserDefaults.standard.set(notificationThreshold, forKey: UDKey.notificationThreshold)
         }
     }
 
     @Published var launchAtLogin: Bool {
         didSet {
-            UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
+            UserDefaults.standard.set(launchAtLogin, forKey: UDKey.launchAtLogin)
             updateLoginItem()
         }
     }
 
     @Published var compactMode: Bool {
         didSet {
-            UserDefaults.standard.set(compactMode, forKey: "compactMode")
+            UserDefaults.standard.set(compactMode, forKey: UDKey.compactMode)
         }
     }
 
     @Published var menuBarDisplayMode: MenuBarDisplayMode {
         didSet {
-            UserDefaults.standard.set(menuBarDisplayMode.rawValue, forKey: "menuBarDisplayMode")
+            UserDefaults.standard.set(menuBarDisplayMode.rawValue, forKey: UDKey.menuBarDisplayMode)
             setupCountdownTimer()
         }
     }
 
     @Published var dailyBudget: Double {
         didSet {
-            UserDefaults.standard.set(dailyBudget, forKey: "dailyBudget")
+            UserDefaults.standard.set(dailyBudget, forKey: UDKey.dailyBudget)
         }
     }
 
@@ -419,6 +419,27 @@ class UsageManager: ObservableObject {
         return "~\(minutes)m"
     }
 
+    // MARK: - Monthly cost forecast
+
+    var monthlyForecast: (projected: Double, daysRemaining: Int)? {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: today)),
+              let daysInMonth = cal.range(of: .day, in: .month, for: today)?.count
+        else { return nil }
+        let dayOfMonth = cal.component(.day, from: today)
+        guard dayOfMonth >= 3 else { return nil } // Need at least 3 days of data
+
+        let costSoFar = monthStats.daily
+            .filter { cal.startOfDay(for: $0.date) >= monthStart }
+            .reduce(0.0) { $0 + $1.cost }
+        guard costSoFar > 0 else { return nil }
+
+        let dailyRate = costSoFar / Double(dayOfMonth)
+        let projected = dailyRate * Double(daysInMonth)
+        return (projected: projected, daysRemaining: daysInMonth - dayOfMonth)
+    }
+
     // MARK: - Model advisor
 
     var modelAdvisorTip: String? {
@@ -473,32 +494,36 @@ class UsageManager: ObservableObject {
     private var activeSessionTimer: AnyCancellable?
     private var cancellables = Set<AnyCancellable>()
     private var isRefreshingToken = false
+    private var tokenRefreshQueue: [(Bool) -> Void] = [] // queued callbacks for concurrent refresh requests
     private var statsWorkItem: DispatchWorkItem?
+    private var timelineWorkItem: DispatchWorkItem?
+    private var roiWorkItem: DispatchWorkItem?
 
     // Track previous quota utilizations for reset detection
     private var previousQuotaUtilizations: [String: Double] = [:]
 
     // Multi-threshold notification tracking (persisted)
     private var notifiedThresholds: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: "notifiedThresholds") ?? []) }
-        set { UserDefaults.standard.set(Array(newValue), forKey: "notifiedThresholds") }
+        get { Set(UserDefaults.standard.stringArray(forKey: UDKey.notifiedThresholds) ?? []) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: UDKey.notifiedThresholds) }
     }
 
     // MARK: - Initialisation
 
     init() {
-        let savedInterval = UserDefaults.standard.integer(forKey: "refreshInterval")
+        let ud = UserDefaults.standard
+        let savedInterval = ud.integer(forKey: UDKey.refreshInterval)
         self.refreshInterval = RefreshInterval(rawValue: savedInterval) ?? .twoMin
-        self.notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
-        self.notificationThreshold = UserDefaults.standard.object(forKey: "notificationThreshold") as? Double ?? 20.0
-        self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
-        self.compactMode = UserDefaults.standard.bool(forKey: "compactMode")
-        let savedDisplayMode = UserDefaults.standard.integer(forKey: "menuBarDisplayMode")
+        self.notificationsEnabled = ud.object(forKey: UDKey.notificationsEnabled) as? Bool ?? true
+        self.notificationThreshold = ud.object(forKey: UDKey.notificationThreshold) as? Double ?? 20.0
+        self.launchAtLogin = ud.bool(forKey: UDKey.launchAtLogin)
+        self.compactMode = ud.bool(forKey: UDKey.compactMode)
+        let savedDisplayMode = ud.integer(forKey: UDKey.menuBarDisplayMode)
         self.menuBarDisplayMode = MenuBarDisplayMode(rawValue: savedDisplayMode) ?? .percentageAndTimer
-        self.dailyBudget = UserDefaults.standard.double(forKey: "dailyBudget")
+        self.dailyBudget = ud.double(forKey: UDKey.dailyBudget)
 
         // Load per-project budgets
-        if let data = UserDefaults.standard.data(forKey: "projectBudgets"),
+        if let data = ud.data(forKey: UDKey.projectBudgets),
            let decoded = try? JSONDecoder().decode([String: Double].self, from: data) {
             self.projectBudgets = decoded
         } else {
@@ -506,7 +531,7 @@ class UsageManager: ObservableObject {
         }
 
         // Load custom alert rules
-        if let data = UserDefaults.standard.data(forKey: "customAlertRules"),
+        if let data = ud.data(forKey: UDKey.customAlertRules),
            let decoded = try? JSONDecoder().decode([AlertRule].self, from: data) {
             self.customAlertRules = decoded
         } else {
@@ -514,7 +539,7 @@ class UsageManager: ObservableObject {
         }
 
         // Load session annotations
-        if let data = UserDefaults.standard.data(forKey: "sessionAnnotations"),
+        if let data = ud.data(forKey: UDKey.sessionAnnotations),
            let decoded = try? JSONDecoder().decode([String: SessionAnnotation].self, from: data) {
             self.sessionAnnotations = decoded
         } else {
@@ -522,13 +547,13 @@ class UsageManager: ObservableObject {
         }
 
         // Load accounts
-        if let data = UserDefaults.standard.data(forKey: "accounts"),
+        if let data = ud.data(forKey: UDKey.accounts),
            let decoded = try? JSONDecoder().decode([AccountInfo].self, from: data) {
             self.accounts = decoded
         } else {
             self.accounts = []
         }
-        self.activeAccountIndex = UserDefaults.standard.integer(forKey: "activeAccountIndex")
+        self.activeAccountIndex = ud.integer(forKey: UDKey.activeAccountIndex)
 
         // Forward objectWillChange from sub-managers
         auth.objectWillChange.sink { [weak self] _ in
@@ -598,7 +623,7 @@ class UsageManager: ObservableObject {
                 self?.monthStats = month
                 self?.sessionHistory = sessions
                 self?.isLoadingStats = false
-                print("[ClaudeGod] Stats: today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost)) projects=\(month.byProject.count) sessions=\(sessions.count)")
+                Log.info("Stats: today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost)) projects=\(month.byProject.count) sessions=\(sessions.count)")
             }
         }
         statsWorkItem = workItem
@@ -609,14 +634,17 @@ class UsageManager: ObservableObject {
 
     func refreshTimeline() {
         isLoadingTimeline = true
+        timelineWorkItem?.cancel()
         let date = timelineDate
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        let workItem = DispatchWorkItem { [weak self] in
             let sessions = SessionAnalyzer.timelineSessions(for: date)
             DispatchQueue.main.async {
                 self?.timelineSessions = sessions
                 self?.isLoadingTimeline = false
             }
         }
+        timelineWorkItem = workItem
+        DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
     }
 
     func timelineGoToPreviousDay() {
@@ -638,13 +666,16 @@ class UsageManager: ObservableObject {
     func refreshROI() {
         guard isGitAvailable else { return }
         isLoadingROI = true
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        roiWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
             let stats = Self.computeROI()
             DispatchQueue.main.async {
                 self?.roiStats = stats
                 self?.isLoadingROI = false
             }
         }
+        roiWorkItem = workItem
+        DispatchQueue.global(qos: .utility).async(execute: workItem)
     }
 
     private static func computeROI() -> ROIStats {
@@ -815,20 +846,33 @@ class UsageManager: ObservableObject {
             let remaining = Int(until.timeIntervalSince(Date()))
             if remaining > 0 {
                 errorMessage = "Rate limited — retry in \(remaining)s"
-                print("[ClaudeGod] Skipping refresh, rate limited for \(remaining)s more")
+                Log.info("Skipping refresh, rate limited for \(remaining)s more")
                 return
             }
             rateLimitedUntil = nil
         }
 
         if auth.tokenNeedsRefresh && auth.refreshToken != nil {
-            guard !isRefreshingToken else { return }
-            isRefreshingToken = true
             isLoading = true
             errorMessage = nil
+            if isRefreshingToken {
+                // Already refreshing — queue this request to avoid duplicate token refreshes
+                tokenRefreshQueue.append { [weak self] success in
+                    guard let self else { return }
+                    if success { self.fetchUsage() }
+                    else {
+                        self.isLoading = false
+                        self.errorMessage = "Session expired — run `claude login`"
+                    }
+                }
+                return
+            }
+            isRefreshingToken = true
             auth.refreshAccessToken { [weak self] success in
                 guard let self else { return }
                 self.isRefreshingToken = false
+                let queued = self.tokenRefreshQueue
+                self.tokenRefreshQueue.removeAll()
                 if success {
                     self.fetchUsage()
                 } else {
@@ -837,6 +881,8 @@ class UsageManager: ObservableObject {
                         self.errorMessage = "Session expired — run `claude login`"
                     }
                 }
+                // Notify queued callers
+                for callback in queued { callback(success) }
             }
             return
         }
@@ -860,7 +906,7 @@ class UsageManager: ObservableObject {
         request.setValue("ClaudeGod", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 15
 
-        print("[ClaudeGod] Fetching usage from OAuth API... (attempt \(retryCount + 1))")
+        Log.info("Fetching usage from OAuth API... (attempt \(retryCount + 1))")
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
@@ -869,14 +915,14 @@ class UsageManager: ObservableObject {
                 if let error = error {
                     if retryCount < Self.maxRetries {
                         let delay = pow(2.0, Double(retryCount))
-                        print("[ClaudeGod] Network error, retrying in \(Int(delay))s: \(error.localizedDescription)")
+                        Log.warn("Network error, retrying in \(Int(delay))s: \(error.localizedDescription)")
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                             self.fetchUsage(retryCount: retryCount + 1)
                         }
                         return
                     }
                     self.isLoading = false
-                    self.errorMessage = error.localizedDescription
+                    self.errorMessage = "Network error — check your connection"
                     return
                 }
 
@@ -886,7 +932,7 @@ class UsageManager: ObservableObject {
                     return
                 }
 
-                print("[ClaudeGod] HTTP \(httpResponse.statusCode)")
+                Log.info("HTTP \(httpResponse.statusCode)")
 
                 switch httpResponse.statusCode {
                 case 200:
@@ -896,7 +942,7 @@ class UsageManager: ObservableObject {
                         return
                     }
                     if let raw = String(data: data, encoding: .utf8) {
-                        print("[ClaudeGod] Response: \(raw.prefix(500))")
+                        Log.info("Response: \(raw.prefix(500))")
                     }
                     // Store previous utilizations for reset detection
                     self.previousQuotaUtilizations = Dictionary(
@@ -914,7 +960,7 @@ class UsageManager: ObservableObject {
 
                 case 401, 403:
                     if self.auth.refreshToken != nil {
-                        print("[ClaudeGod] Got \(httpResponse.statusCode), attempting token refresh...")
+                        Log.info("Got \(httpResponse.statusCode), attempting token refresh...")
                         self.auth.refreshAccessToken { success in
                             if success {
                                 self.fetchUsage()
@@ -938,10 +984,10 @@ class UsageManager: ObservableObject {
 
                     if isLikelyStaleToken && self.auth.refreshToken != nil && retryCount == 0 {
                         // Token likely expired server-side — refresh and retry once
-                        print("[ClaudeGod] 429 with Retry-After:0 — likely stale token, refreshing...")
+                        Log.info("429 with Retry-After:0 — likely stale token, refreshing...")
                         self.auth.refreshAccessToken { success in
                             if success {
-                                print("[ClaudeGod] Token refreshed, retrying fetch...")
+                                Log.info("Token refreshed, retrying fetch...")
                                 self.fetchUsage(retryCount: retryCount + 1)
                             } else {
                                 DispatchQueue.main.async {
@@ -951,13 +997,14 @@ class UsageManager: ObservableObject {
                             }
                         }
                     } else if !self.quotas.isEmpty {
-                        // We have cached data — keep it silently
+                        // We have cached data — use Retry-After header if present
+                        let cooldown = retryAfterValue > 0 ? retryAfterValue : 30.0
                         self.isLoading = false
-                        self.rateLimitedUntil = Date().addingTimeInterval(30)
-                        print("[ClaudeGod] Rate limited (429), keeping existing data")
+                        self.rateLimitedUntil = Date().addingTimeInterval(cooldown)
+                        Log.info("Rate limited (429), keeping existing data, retry in \(Int(cooldown))s")
                     } else if retryCount < Self.maxRetries {
                         let delay = 5 * pow(2.0, Double(retryCount))
-                        print("[ClaudeGod] Rate limited (429), retrying in \(Int(delay))s (attempt \(retryCount + 1)/\(Self.maxRetries))...")
+                        Log.info("Rate limited (429), retrying in \(Int(delay))s (attempt \(retryCount + 1)/\(Self.maxRetries))...")
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                             self.fetchUsage(retryCount: retryCount + 1)
                         }
@@ -969,7 +1016,7 @@ class UsageManager: ObservableObject {
                 default:
                     if httpResponse.statusCode >= 500 && retryCount < Self.maxRetries {
                         let delay = pow(2.0, Double(retryCount))
-                        print("[ClaudeGod] Server error \(httpResponse.statusCode), retrying in \(Int(delay))s")
+                        Log.warn("Server error \(httpResponse.statusCode), retrying in \(Int(delay))s")
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                             self.fetchUsage(retryCount: retryCount + 1)
                         }
@@ -989,9 +1036,9 @@ class UsageManager: ObservableObject {
             let response = try JSONDecoder().decode(OAuthUsageResponse.self, from: data)
             applyUsageResponse(response)
         } catch {
-            print("[ClaudeGod] Failed to parse usage response: \(error)")
+            Log.error("Failed to parse usage response: \(error)")
             if let raw = String(data: data, encoding: .utf8) {
-                print("[ClaudeGod] Raw response: \(raw.prefix(300))")
+                Log.info("Raw response: \(raw.prefix(300))")
             }
             errorMessage = "Failed to parse response"
         }
@@ -1014,7 +1061,7 @@ class UsageManager: ObservableObject {
                 resetsAt: q.resetsAt.flatMap(Formatters.parseISO)
             )
         }
-        print("[ClaudeGod] Parsed \(quotas.count) quotas")
+        Log.info("Parsed \(quotas.count) quotas")
     }
 
     // MARK: - Countdown
@@ -1139,7 +1186,7 @@ class UsageManager: ObservableObject {
             content.sound = .default
             let request = UNNotificationRequest(identifier: "reset-\(UUID().uuidString)", content: content, trigger: nil)
             UNUserNotificationCenter.current().add(request)
-            print("[ClaudeGod] Reset notification sent for \(quota.label)")
+            Log.info("Reset notification sent for \(quota.label)")
         }
     }
 
@@ -1246,10 +1293,11 @@ class UsageManager: ObservableObject {
             ["utilization": q.utilization, "labelIndex": Double(index)]
         }
         if let data = try? JSONEncoder().encode(quotaData) {
-            defaults.set(data, forKey: "widgetQuotas")
+            defaults.set(data, forKey: UDKey.widgetQuotas)
         }
-        defaults.set(todayStats.totalCost, forKey: "widgetTodayCost")
-        defaults.set(todayStats.totalMessages, forKey: "widgetTodayMessages")
+        defaults.set(todayStats.totalCost, forKey: UDKey.widgetTodayCost)
+        defaults.set(todayStats.totalMessages, forKey: UDKey.widgetTodayMessages)
+        defaults.set(Date().timeIntervalSince1970, forKey: UDKey.widgetLastUpdate)
 
         // Trigger widget reload if available
         if #available(macOS 14.0, *) {
@@ -1267,7 +1315,7 @@ class UsageManager: ObservableObject {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            print("[ClaudeGod] Failed to update launch at login: \(error.localizedDescription)")
+            Log.error("Failed to update launch at login: \(error.localizedDescription)")
         }
     }
 
@@ -1307,6 +1355,51 @@ class UsageManager: ObservableObject {
     }
 
     @Published var csvExportSuccess: Bool?
+    @Published var jsonExportSuccess: Bool?
+
+    func exportJSON() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "claude-usage-\(Formatters.csvDate.string(from: Date())).json"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let exportData: [String: Any] = [
+            "exportDate": ISO8601DateFormatter().string(from: Date()),
+            "period": "30 days",
+            "totalCost": monthStats.totalCost,
+            "totalMessages": monthStats.totalMessages,
+            "sessionCount": monthStats.sessionCount,
+            "models": monthStats.aggregatedModels.map { [
+                "name": $0.shortName,
+                "cost": $0.cost,
+                "tokens": $0.tokens.totalTokens
+            ] },
+            "projects": monthStats.byProject.map { [
+                "name": $0.projectName,
+                "cost": $0.totalCost,
+                "messages": $0.totalMessages,
+                "sessions": $0.sessionCount
+            ] },
+            "daily": monthStats.daily.reversed().map { [
+                "date": Formatters.csvDate.string(from: $0.date),
+                "cost": $0.cost,
+                "messages": $0.messageCount
+            ] }
+        ]
+
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: exportData, options: [.prettyPrinted, .sortedKeys])
+            try jsonData.write(to: url, options: .atomic)
+            jsonExportSuccess = true
+        } catch {
+            jsonExportSuccess = false
+            Log.error("JSON export failed: \(error.localizedDescription)")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.jsonExportSuccess = nil
+        }
+    }
 
     func exportCSV() {
         let panel = NSSavePanel()
@@ -1328,7 +1421,7 @@ class UsageManager: ObservableObject {
             csvExportSuccess = true
         } catch {
             csvExportSuccess = false
-            print("[ClaudeGod] CSV export failed: \(error.localizedDescription)")
+            Log.error("CSV export failed: \(error.localizedDescription)")
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             self?.csvExportSuccess = nil

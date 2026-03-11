@@ -21,7 +21,7 @@ private enum Theme {
 struct MenuBarView: View {
     @ObservedObject var manager: UsageManager
     @State private var copiedFeedback = false
-    @AppStorage("dailyRange") private var dailyRange: Int = 7
+    @AppStorage(UDKey.dailyRange) private var dailyRange: Int = 7
 
     var body: some View {
         VStack(spacing: 0) {
@@ -594,6 +594,32 @@ struct MenuBarView: View {
                 )
             }
 
+            // Monthly cost forecast
+            if let forecast = manager.monthlyForecast {
+                HStack(spacing: 6) {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.blue)
+                    Text("Projected this month")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(formatCost(forecast.projected))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.blue)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                        .strokeBorder(Color.blue.opacity(0.15), lineWidth: 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                                .fill(Color.blue.opacity(0.05))
+                        )
+                )
+            }
+
             // Model advisor
             if let tip = manager.modelAdvisorTip {
                 HStack(spacing: 6) {
@@ -876,6 +902,29 @@ struct MenuBarView: View {
                 // Efficiency metrics
                 efficiencyView
 
+                // Monthly forecast
+                if let forecast = manager.monthlyForecast {
+                    SHCard {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .font(.system(size: 12))
+                                .foregroundColor(.blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Monthly Forecast")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.primary.opacity(0.7))
+                                Text("\(forecast.daysRemaining) days remaining")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Text(formatCost(forecast.projected))
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundColor(.blue)
+                        }
+                    }
+                }
+
                 // Heatmap
                 heatmapView
 
@@ -1023,6 +1072,14 @@ struct MenuBarView: View {
                         manager.exportCSV()
                     }
 
+                    SHButton(
+                        label: manager.jsonExportSuccess == true ? "Saved!" : manager.jsonExportSuccess == false ? "Failed" : "JSON",
+                        icon: manager.jsonExportSuccess == true ? "checkmark" : "square.and.arrow.up",
+                        style: manager.jsonExportSuccess == true ? .success : .outline
+                    ) {
+                        manager.exportJSON()
+                    }
+
                     Spacer()
                 }
             }
@@ -1106,9 +1163,11 @@ struct MenuBarView: View {
                         Rectangle().fill(Theme.border).frame(width: 1, height: 28)
 
                         VStack(spacing: 2) {
-                            Text(formatTokens(eff.avgTokensPerSession))
+                            let totalDuration = manager.sessionHistory.reduce(0.0) { $0 + $1.duration }
+                            let costPerMin = totalDuration > 60 ? manager.monthStats.totalCost / (totalDuration / 60) : 0
+                            Text(costPerMin >= 0.01 ? String(format: "$%.2f", costPerMin) : String(format: "$%.3f", costPerMin))
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            Text("tok/session")
+                            Text("$/min")
                                 .font(.system(size: 8))
                                 .foregroundColor(.secondary)
                         }
@@ -1576,21 +1635,34 @@ struct MenuBarView: View {
     }
 
     private func errorView(_ error: String) -> some View {
-        SHCard {
+        let isAuth = error.contains("login") || error.contains("expired") || error.contains("authenticated")
+        let isNetwork = error.contains("Network") || error.contains("connection")
+        let isRateLimit = error.contains("Rate limited") || error.contains("retry")
+
+        return SHCard {
             HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle")
+                Image(systemName: isAuth ? "key.fill" : isRateLimit ? "clock.fill" : "exclamationmark.triangle")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.orange)
+                    .foregroundColor(isRateLimit ? .blue : .orange)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(error)
                         .font(.system(size: 12, weight: .medium))
-                    Text("Check settings")
+                    Text(isAuth ? "Run `claude login` in Terminal" :
+                         isNetwork ? "Check your internet connection" :
+                         isRateLimit ? "Will auto-retry shortly" :
+                         "Try refreshing or check settings")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                SHButton(label: "Retry", icon: "arrow.clockwise", style: .outline) {
-                    manager.refresh()
+                if isAuth {
+                    SHButton(label: "Settings", icon: "gearshape", style: .outline) {
+                        manager.showSettings = true
+                    }
+                } else {
+                    SHButton(label: "Retry", icon: "arrow.clockwise", style: .outline) {
+                        manager.refresh()
+                    }
                 }
             }
         }

@@ -3,6 +3,37 @@
 
 import Foundation
 
+// MARK: - UserDefaults keys (centralized)
+
+enum UDKey {
+    static let refreshInterval = "refreshInterval"
+    static let notificationsEnabled = "notificationsEnabled"
+    static let notificationThreshold = "notificationThreshold"
+    static let launchAtLogin = "launchAtLogin"
+    static let compactMode = "compactMode"
+    static let menuBarDisplayMode = "menuBarDisplayMode"
+    static let dailyBudget = "dailyBudget"
+    static let dailyRange = "dailyRange"
+    static let projectBudgets = "projectBudgets"
+    static let customAlertRules = "customAlertRules"
+    static let sessionAnnotations = "sessionAnnotations"
+    static let accounts = "accounts"
+    static let activeAccountIndex = "activeAccountIndex"
+    static let notifiedThresholds = "notifiedThresholds"
+    static let widgetQuotas = "widgetQuotas"
+    static let widgetTodayCost = "widgetTodayCost"
+    static let widgetTodayMessages = "widgetTodayMessages"
+    static let widgetLastUpdate = "widgetLastUpdate"
+}
+
+// MARK: - Logging
+
+enum Log {
+    static func info(_ msg: String) { print("[ClaudeGod] \(msg)") }
+    static func warn(_ msg: String) { print("[ClaudeGod] ⚠ \(msg)") }
+    static func error(_ msg: String) { print("[ClaudeGod] ✗ \(msg)") }
+}
+
 // MARK: - Pricing ($/token)
 
 enum ModelPricing {
@@ -30,7 +61,7 @@ enum ModelPricing {
                          cacheCreation: 1.25 / 1_000_000, cacheRead: 0.10 / 1_000_000)
         }
         // Default to Sonnet pricing for unknown models
-        print("[ClaudeGod] Unknown model '\(model)' — using Sonnet pricing as fallback")
+        Log.warn("Unknown model '\(model)' — using Sonnet pricing as fallback")
         return Price(input: 3.0 / 1_000_000, output: 15.0 / 1_000_000,
                      cacheCreation: 3.75 / 1_000_000, cacheRead: 0.30 / 1_000_000)
     }
@@ -388,7 +419,7 @@ class SessionAnalyzer {
         guard let projectDirs = try? fm.contentsOfDirectory(
             at: projectsDir, includingPropertiesForKeys: nil
         ) else {
-            print("[ClaudeGod] No projects directory found")
+            Log.warn("No projects directory found at \(projectsDir.path)")
             return UsageStats()
         }
 
@@ -415,7 +446,7 @@ class SessionAnalyzer {
 
                 // Skip files that are too large
                 if let fileSize = attrs[.size] as? UInt64, fileSize > maxFileSize {
-                    print("[ClaudeGod] Skipping oversized JSONL (\(fileSize / 1_048_576)MB): \(file.lastPathComponent)")
+                    Log.warn("Skipping oversized JSONL (\(fileSize / 1_048_576)MB): \(file.lastPathComponent)")
                     continue
                 }
 

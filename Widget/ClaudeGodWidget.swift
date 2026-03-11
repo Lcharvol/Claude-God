@@ -11,17 +11,21 @@ struct QuotaEntry: TimelineEntry {
     let quotas: [QuotaInfo]
     let todayCost: Double
     let todayMessages: Int
+    let lastUpdate: Date?
+    let isPlaceholder: Bool
 
     static let placeholder = QuotaEntry(
         date: Date(),
         quotas: [
-            QuotaInfo(label: "Session", utilization: 42, color: .green),
-            QuotaInfo(label: "Weekly", utilization: 28, color: .green),
-            QuotaInfo(label: "Sonnet", utilization: 15, color: .green),
-            QuotaInfo(label: "Opus", utilization: 67, color: .orange)
+            QuotaInfo(label: "Session", utilization: 0, color: .gray),
+            QuotaInfo(label: "Weekly", utilization: 0, color: .gray),
+            QuotaInfo(label: "Sonnet", utilization: 0, color: .gray),
+            QuotaInfo(label: "Opus", utilization: 0, color: .gray)
         ],
-        todayCost: 1.23,
-        todayMessages: 45
+        todayCost: 0,
+        todayMessages: 0,
+        lastUpdate: nil,
+        isPlaceholder: true
     )
 }
 
@@ -55,20 +59,21 @@ struct ClaudeGodProvider: TimelineProvider {
         let todayCost: Double
         let todayMessages: Int
 
+        // Read last update timestamp
+        let lastUpdateTS = defaults.double(forKey: "widgetLastUpdate")
+        let lastUpdate: Date? = lastUpdateTS > 0 ? Date(timeIntervalSince1970: lastUpdateTS) : nil
+
         if let data = defaults.data(forKey: "widgetQuotas"),
            let decoded = try? JSONDecoder().decode([[String: Double]].self, from: data) {
             quotas = decoded.map { dict in
                 let util = dict["utilization"] ?? 0
                 let color: Color = util < 50 ? .green : util < 80 ? .orange : .red
-                return QuotaInfo(
-                    label: dict["labelIndex"].flatMap { idx in
-                        let labels = ["Session", "Weekly", "Sonnet", "Opus"]
-                        let i = Int(idx) % labels.count
-                        return i >= 0 ? labels[i] : nil
-                    } ?? "Quota",
-                    utilization: util,
-                    color: color
-                )
+                let labels = ["Session", "Weekly", "Sonnet", "Opus"]
+                let label = dict["labelIndex"].flatMap { idx in
+                    let i = Int(idx)
+                    return i >= 0 && i < labels.count ? labels[i] : nil
+                } ?? "Quota"
+                return QuotaInfo(label: label, utilization: util, color: color)
             }
         } else {
             quotas = []
@@ -78,14 +83,23 @@ struct ClaudeGodProvider: TimelineProvider {
         todayMessages = defaults.integer(forKey: "widgetTodayMessages")
 
         if quotas.isEmpty {
-            return .placeholder
+            return QuotaEntry(
+                date: Date(),
+                quotas: [],
+                todayCost: 0,
+                todayMessages: 0,
+                lastUpdate: nil,
+                isPlaceholder: false
+            )
         }
 
         return QuotaEntry(
             date: Date(),
             quotas: quotas,
             todayCost: todayCost,
-            todayMessages: todayMessages
+            todayMessages: todayMessages,
+            lastUpdate: lastUpdate,
+            isPlaceholder: false
         )
     }
 }
@@ -120,41 +134,83 @@ struct QuotaGaugeView: View {
 struct ClaudeGodWidgetView: View {
     let entry: QuotaEntry
 
+    private var staleness: String? {
+        guard let lastUpdate = entry.lastUpdate else { return nil }
+        let elapsed = Date().timeIntervalSince(lastUpdate)
+        if elapsed < 300 { return nil } // Less than 5 min, fresh
+        let hours = Int(elapsed) / 3600
+        let minutes = (Int(elapsed) % 3600) / 60
+        if hours > 0 { return "\(hours)h ago" }
+        return "\(minutes)m ago"
+    }
+
     var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 4) {
-                Text("C")
-                    .font(.system(size: 11, weight: .heavy))
-                    .foregroundColor(.white)
-                    .frame(width: 18, height: 18)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(Color(red: 0.56, green: 0.39, blue: 0.98))
-                    )
-                Text("Claude God")
-                    .font(.system(size: 11, weight: .semibold))
+        if entry.quotas.isEmpty && !entry.isPlaceholder {
+            // No data — prompt user to open the app
+            VStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Text("C")
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundColor(.white)
+                        .frame(width: 18, height: 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Color(red: 0.56, green: 0.39, blue: 0.98))
+                        )
+                    Text("Claude God")
+                        .font(.system(size: 11, weight: .semibold))
+                    Spacer()
+                }
                 Spacer()
-                if entry.todayCost > 0 {
-                    Text(entry.todayCost >= 0.01 ? String(format: "$%.2f", entry.todayCost) : String(format: "$%.3f", entry.todayCost))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 16))
+                    .foregroundColor(.secondary)
+                Text("Open app to load data")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(12)
+        } else {
+            VStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Text("C")
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundColor(.white)
+                        .frame(width: 18, height: 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Color(red: 0.56, green: 0.39, blue: 0.98))
+                        )
+                    Text("Claude God")
+                        .font(.system(size: 11, weight: .semibold))
+                    Spacer()
+                    if let stale = staleness {
+                        Text(stale)
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(.orange)
+                    } else if entry.todayCost > 0 {
+                        Text(entry.todayCost >= 0.01 ? String(format: "$%.2f", entry.todayCost) : String(format: "$%.3f", entry.todayCost))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    ForEach(entry.quotas.prefix(4)) { quota in
+                        QuotaGaugeView(quota: quota)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                if entry.todayMessages > 0 {
+                    Text("\(entry.todayMessages) messages today")
+                        .font(.system(size: 9))
                         .foregroundColor(.secondary)
                 }
             }
-
-            HStack(spacing: 12) {
-                ForEach(entry.quotas.prefix(4)) { quota in
-                    QuotaGaugeView(quota: quota)
-                }
-            }
-            .frame(maxWidth: .infinity)
-
-            if entry.todayMessages > 0 {
-                Text("\(entry.todayMessages) messages today")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary)
-            }
+            .padding(12)
         }
-        .padding(12)
     }
 }
 

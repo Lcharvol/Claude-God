@@ -86,9 +86,41 @@ enum GitAnalyzer {
 
     /// Convert a Claude projects directory name to an actual filesystem path
     /// e.g. "-Users-lucascharvolin-Projects-BeeTime" -> "/Users/lucascharvolin/Projects/BeeTime"
-    static func actualPath(from dirName: String) -> String {
+    /// Handles hyphens in real directory names by greedily matching existing paths.
+    static func actualPath(from dirName: String) -> String? {
         let cleaned = dirName.hasPrefix("-") ? String(dirName.dropFirst()) : dirName
-        return "/" + cleaned.replacingOccurrences(of: "-", with: "/")
+        let parts = cleaned.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
+        guard !parts.isEmpty else { return nil }
+
+        let fm = FileManager.default
+        return resolvePathParts(parts, currentPath: "", fm: fm)
+    }
+
+    /// Recursively resolve path segments, joining with "-" when a directory contains hyphens
+    private static func resolvePathParts(_ parts: [String], currentPath: String, fm: FileManager) -> String? {
+        guard !parts.isEmpty else {
+            return currentPath.isEmpty ? nil : currentPath
+        }
+
+        // Try joining progressively more segments with hyphens
+        for endIdx in (1...parts.count) {
+            let candidate = parts[0..<endIdx].joined(separator: "-")
+            let fullPath = currentPath + "/" + candidate
+            let remaining = Array(parts[endIdx...])
+
+            if remaining.isEmpty {
+                // Last segment — accept if path exists or as best effort
+                if fm.fileExists(atPath: fullPath) { return fullPath }
+            } else if fm.fileExists(atPath: fullPath) {
+                // This segment exists as a directory, try to resolve the rest
+                if let resolved = resolvePathParts(remaining, currentPath: fullPath, fm: fm) {
+                    return resolved
+                }
+            }
+        }
+
+        // Fallback: simple replacement (won't match, but fileExists check downstream will filter)
+        return nil
     }
 
     /// Find the git root for a given path (walks up to find .git)
@@ -113,7 +145,7 @@ enum GitAnalyzer {
     /// Parse git log for a repository over the last N days
     static func commits(in repoPath: String, sinceDaysAgo days: Int = 30) -> [GitCommit] {
         guard let email = userEmail(in: repoPath) else {
-            print("[ClaudeGod] Could not get git email for \(repoPath)")
+            Log.warn("Could not get git email for \(repoPath)")
             return []
         }
 
@@ -132,13 +164,14 @@ enum GitAnalyzer {
 
         do {
             try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return [] }
         } catch {
             return []
         }
 
+        // Read pipe BEFORE waitUntilExit to avoid deadlock when output > pipe buffer (~64KB)
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return [] }
         guard let output = String(data: data, encoding: .utf8), !output.isEmpty else { return [] }
 
         let isoFormatter = ISO8601DateFormatter()
@@ -203,7 +236,7 @@ enum GitAnalyzer {
 
         for projectDir in projectDirs {
             let dirName = projectDir.lastPathComponent
-            let path = actualPath(from: dirName)
+            guard let path = actualPath(from: dirName) else { continue }
 
             guard fm.fileExists(atPath: path),
                   let root = gitRoot(for: path),

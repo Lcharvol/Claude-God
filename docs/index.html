@@ -1273,12 +1273,16 @@
 
             <div class="oss-stats">
                 <div class="oss-stat">
-                    <div class="num">~4200</div>
-                    <div class="lbl">Lines of code</div>
+                    <div class="num" id="stat-downloads">—</div>
+                    <div class="lbl">Installs</div>
                 </div>
                 <div class="oss-stat">
-                    <div class="num">9</div>
-                    <div class="lbl">Source files</div>
+                    <div class="num" id="stat-stars">—</div>
+                    <div class="lbl">GitHub stars</div>
+                </div>
+                <div class="oss-stat">
+                    <div class="num">~4500</div>
+                    <div class="lbl">Lines of code</div>
                 </div>
                 <div class="oss-stat">
                     <div class="num">0</div>
@@ -1351,28 +1355,38 @@
         }, 600);
     });
 
-    // Fetch repo info from GitHub (version + stars)
+    // Fetch repo info from GitHub (version + stars + downloads)
     fetch('https://api.github.com/repos/Lcharvol/Claude-God')
         .then(r => r.json())
         .then(d => {
-            // Star count
             if (d.stargazers_count !== undefined) {
                 const stars = d.stargazers_count;
                 const label = stars >= 1000 ? (stars / 1000).toFixed(1) + 'k' : String(stars);
                 document.querySelectorAll('#nav-stars, #hero-stars').forEach(el => el.textContent = '(' + label + ')');
+                const statStars = document.getElementById('stat-stars');
+                if (statStars) statStars.textContent = label;
             }
         })
         .catch(() => {});
 
-    fetch('https://api.github.com/repos/Lcharvol/Claude-God/releases/latest')
+    fetch('https://api.github.com/repos/Lcharvol/Claude-God/releases')
         .then(r => r.json())
-        .then(d => {
-            if (d.tag_name) {
-                const v = d.tag_name;
+        .then(releases => {
+            // Total DMG downloads across all releases
+            let totalDownloads = 0;
+            let latestTag = null;
+            releases.forEach((rel, i) => {
+                if (i === 0) latestTag = rel.tag_name;
+                (rel.assets || []).forEach(a => { totalDownloads += a.download_count; });
+            });
+            const dlEl = document.getElementById('stat-downloads');
+            if (dlEl) dlEl.textContent = totalDownloads >= 1000 ? (totalDownloads / 1000).toFixed(1) + 'k' : String(totalDownloads);
+            // Version from latest release
+            if (latestTag) {
                 const heroV = document.getElementById('hero-version');
                 const navV = document.getElementById('nav-version');
-                if (heroV) heroV.textContent = v;
-                if (navV) navV.textContent = v;
+                if (heroV) heroV.textContent = latestTag;
+                if (navV) navV.textContent = latestTag;
             }
         })
         .catch(() => {});
@@ -1387,6 +1401,11 @@
         cd.textContent = m + 'm ' + String(s).padStart(2, '0') + 's';
     }, 1000);
 </script>
+
+<!-- GoatCounter — free, privacy-friendly analytics (no cookies) -->
+<!-- Create your account at https://www.goatcounter.com then replace 'claudegod' with your site code -->
+<script data-goatcounter="https://claudegod.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
 
 </body>
 </html>

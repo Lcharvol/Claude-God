@@ -611,23 +611,23 @@ class UsageManager: ObservableObject {
             let weekStart = cal.date(byAdding: .day, value: -7, to: now) ?? now
             let monthStart = cal.date(byAdding: .day, value: -Self.statsWindowDays, to: now) ?? now
 
-            let month = SessionAnalyzer.analyze(since: monthStart)
+            // Single pass: analyze + collect recent sessions together
+            let result = SessionAnalyzer.analyzeWithSessions(since: monthStart, recentLimit: Self.recentSessionsLimit)
+            let month = result.stats
             let week = month.filtered(since: weekStart)
             let today = month.filtered(since: todayStart)
-
-            let sessions = SessionAnalyzer.recentSessions(limit: Self.recentSessionsLimit)
 
             DispatchQueue.main.async {
                 self?.todayStats = today
                 self?.weekStats = week
                 self?.monthStats = month
-                self?.sessionHistory = sessions
+                self?.sessionHistory = result.recentSessions
                 self?.isLoadingStats = false
-                Log.info("Stats: today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost)) projects=\(month.byProject.count) sessions=\(sessions.count)")
+                Log.info("Stats: today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost)) projects=\(month.byProject.count) sessions=\(result.recentSessions.count)")
             }
         }
         statsWorkItem = workItem
-        DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
+        DispatchQueue.global(qos: .utility).async(execute: workItem)
     }
 
     // MARK: - Timeline
@@ -685,21 +685,37 @@ class UsageManager: ObservableObject {
         let allCommits = GitAnalyzer.allCommits(sinceDaysAgo: days)
         guard !allCommits.isEmpty else { return .empty }
 
-        // Get all sessions for the last 30 days
-        var allSessions: [TimelineSession] = []
-        for dayOffset in 0..<days {
-            guard let date = cal.date(byAdding: .day, value: -dayOffset, to: Date()) else { continue }
-            allSessions.append(contentsOf: SessionAnalyzer.timelineSessions(for: date))
-        }
+        // Single-pass: get all sessions for the last 30 days at once
+        let since = cal.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        let allSessions = SessionAnalyzer.allSessions(since: since)
+
+        // Sort sessions by start time for binary-search-based matching
+        let sortedSessions = allSessions.sorted { $0.startTime < $1.startTime }
+        let sessionStarts = sortedSessions.map(\.startTime)
 
         // A commit is assisted if it falls within session.start...session.end+2h for the same project
         let assistedCommits = allCommits.filter { commit in
-            allSessions.contains { session in
-                let windowEnd = session.endTime.addingTimeInterval(assistedWindowSeconds)
-                let inTimeWindow = commit.date >= session.startTime && commit.date <= windowEnd
-                let projectMatch = commit.projectPath.lowercased().contains(session.projectName.lowercased())
-                return inTimeWindow && projectMatch
+            // Binary search: find first session that could overlap (startTime <= commit.date)
+            // Sessions are sorted by startTime — find rightmost session starting <= commit.date
+            var lo = 0, hi = sessionStarts.count
+            while lo < hi {
+                let mid = (lo + hi) / 2
+                if sessionStarts[mid] <= commit.date { lo = mid + 1 } else { hi = mid }
             }
+            // Check sessions in a window around the insertion point
+            let searchStart = max(0, lo - sortedSessions.count) // check all before (could have long windows)
+            let searchEnd = min(sortedSessions.count, lo + 1)
+            let commitPathLower = commit.projectPath.lowercased()
+            for i in (0..<searchEnd).reversed() {
+                let session = sortedSessions[i]
+                // Early exit: if session ended+window is before commit, no earlier session can match either
+                let windowEnd = session.endTime.addingTimeInterval(assistedWindowSeconds)
+                if windowEnd < commit.date { break }
+                if commit.date >= session.startTime && commitPathLower.contains(session.projectName.lowercased()) {
+                    return true
+                }
+            }
+            return false
         }
 
         let totalCost = allSessions.reduce(0.0) { $0 + $1.cost }
@@ -810,11 +826,12 @@ class UsageManager: ObservableObject {
             for dir in dirs {
                 guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }
                 for file in files where file.pathExtension == "jsonl" {
-                    if let attrs = try? fm.attributesOfItem(atPath: file.path),
-                       let modDate = attrs[.modificationDate] as? Date,
+                    // Use resourceValues from directory listing instead of extra stat() call
+                    if let values = try? file.resourceValues(forKeys: [.contentModificationDateKey]),
+                       let modDate = values.contentModificationDate,
                        now.timeIntervalSince(modDate) < threshold {
-                        // Also compute live session cost
-                        let sessionData = SessionAnalyzer.activeSessionCost()
+                        // Compute cost directly on the found file — no re-scan
+                        let sessionData = SessionAnalyzer.sessionCost(for: file)
                         DispatchQueue.main.async {
                             self?.isSessionActive = true
                             self?.activeSessionCost = sessionData?.cost ?? 0

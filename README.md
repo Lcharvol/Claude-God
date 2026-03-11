@@ -17,9 +17,14 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot-usage.png" width="320" alt="Usage view — quota cards with progress bars">
+  <img src="assets/screenshot-usage.png" width="320" alt="Usage — quota cards with progress bars">
   &nbsp;&nbsp;
-  <img src="assets/screenshot-analytics.png" width="320" alt="Analytics view — cost breakdown, sparkline, models">
+  <img src="assets/screenshot-analytics.png" width="320" alt="Analytics — cost breakdown, sparkline, models">
+</p>
+<p align="center">
+  <img src="assets/screenshot-timeline.png" width="320" alt="Timeline — session history with topics and costs">
+  &nbsp;&nbsp;
+  <img src="assets/screenshot-roi.png" width="320" alt="ROI — return on investment analysis">
 </p>
 
 <p align="center">

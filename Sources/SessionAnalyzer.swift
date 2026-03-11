@@ -76,8 +76,40 @@ private struct JSONLEntry: Decodable {
 }
 
 private struct JSONLMessage: Decodable {
+    let role: String?
     let model: String?
     let usage: JSONLUsage?
+    let content: JSONLContent?
+}
+
+/// Handles content as either a plain string or an array of content blocks
+private enum JSONLContent: Decodable {
+    case text(String)
+    case blocks([JSONLContentBlock])
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let str = try? container.decode(String.self) {
+            self = .text(str)
+        } else if let blocks = try? container.decode([JSONLContentBlock].self) {
+            self = .blocks(blocks)
+        } else {
+            self = .text("")
+        }
+    }
+
+    var text: String {
+        switch self {
+        case .text(let s): return s
+        case .blocks(let blocks):
+            return blocks.first(where: { $0.type == "text" })?.text ?? ""
+        }
+    }
+}
+
+private struct JSONLContentBlock: Decodable {
+    let type: String?
+    let text: String?
 }
 
 private struct JSONLUsage: Decodable {
@@ -377,6 +409,26 @@ class SessionAnalyzer {
     /// Max JSONL file size to load into memory (300 MB)
     private static let maxFileSize: UInt64 = 300 * 1024 * 1024
 
+    /// Iterate JSONL lines from raw Data — avoids Data→String→Data roundtrip
+    private static let newline = UInt8(ascii: "\n")
+    static func enumerateJSONLines(in data: Data, body: (Data) -> Void) {
+        var start = data.startIndex
+        let end = data.endIndex
+        while start < end {
+            if let nlIndex = data[start..<end].firstIndex(of: newline) {
+                if nlIndex > start {
+                    body(data[start..<nlIndex])
+                }
+                start = nlIndex + 1
+            } else {
+                if start < end {
+                    body(data[start..<end])
+                }
+                break
+            }
+        }
+    }
+
     static func parseISO(_ string: String) -> Date? {
         isoFormatter.date(from: string) ?? isoFormatterNoFrac.date(from: string)
     }
@@ -413,14 +465,21 @@ class SessionAnalyzer {
         return name
     }
 
+    /// Result of analyzeWithSessions — stats + recent sessions in a single pass
+    struct AnalysisResult {
+        let stats: UsageStats
+        let recentSessions: [SessionInfo]
+    }
+
     /// Analyse tous les fichiers JSONL pour une période donnée
-    static func analyze(since: Date, until: Date = Date()) -> UsageStats {
+    /// Also collects recent session info (top N by modification date) to avoid a second pass.
+    static func analyzeWithSessions(since: Date, until: Date = Date(), recentLimit: Int = 15) -> AnalysisResult {
         let fm = FileManager.default
         guard let projectDirs = try? fm.contentsOfDirectory(
             at: projectsDir, includingPropertiesForKeys: nil
         ) else {
             Log.warn("No projects directory found at \(projectsDir.path)")
-            return UsageStats()
+            return AnalysisResult(stats: UsageStats(), recentSessions: [])
         }
 
         var modelAgg: [String: (tokens: TokenUsage, cost: Double)] = [:]
@@ -429,40 +488,42 @@ class SessionAnalyzer {
         var totalMessages = 0
         var sessionFiles = Set<String>()
 
+        // For recent sessions: collect all files with modDates, sorted later
+        var allFileInfos: [(url: URL, modDate: Date, projectName: String)] = []
+
         let cal = Calendar.current
 
         for projectDir in projectDirs {
             let dirName = projectDir.lastPathComponent
             let projName = projectName(from: dirName)
 
-            guard let files = try? fm.contentsOfDirectory(at: projectDir, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }
+            guard let files = try? fm.contentsOfDirectory(at: projectDir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]) else { continue }
 
             for file in files where file.pathExtension == "jsonl" {
-                // Skip files older than our window (quick check via modification date)
-                guard let attrs = try? fm.attributesOfItem(atPath: file.path),
-                      let modDate = attrs[.modificationDate] as? Date,
+                // Use resourceValues from directory listing instead of extra stat() call
+                guard let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                      let modDate = values.contentModificationDate,
                       modDate >= since
                 else { continue }
 
                 // Skip files that are too large
-                if let fileSize = attrs[.size] as? UInt64, fileSize > maxFileSize {
+                if let fileSize = values.fileSize, UInt64(fileSize) > maxFileSize {
                     Log.warn("Skipping oversized JSONL (\(fileSize / 1_048_576)MB): \(file.lastPathComponent)")
                     continue
                 }
 
-                guard let data = try? Data(contentsOf: file),
-                      let content = String(data: data, encoding: .utf8)
-                else { continue }
+                // Track for recent sessions
+                allFileInfos.append((url: file, modDate: modDate, projectName: projName))
+
+                guard let data = try? Data(contentsOf: file) else { continue }
 
                 var fileHadMatch = false
                 var fileMessages = 0
                 var fileCost: Double = 0
 
-                content.enumerateLines { line, _ in
-                    guard !line.isEmpty,
-                          let lineData = line.data(using: .utf8),
-                          let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData)
-                    else { return }
+                // Direct Data split — avoids Data→String→Data roundtrip
+                enumerateJSONLines(in: data) { lineData in
+                    guard let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData) else { return }
 
                     guard entry.type == "assistant",
                           let message = entry.message,
@@ -543,7 +604,7 @@ class SessionAnalyzer {
         for m in modelAgg.values { totalTokens.add(m.tokens) }
         let totalCost = modelAgg.values.reduce(0) { $0 + $1.cost }
 
-        return UsageStats(
+        let stats = UsageStats(
             totalCost: totalCost,
             totalTokens: totalTokens,
             totalMessages: totalMessages,
@@ -551,6 +612,83 @@ class SessionAnalyzer {
             byModel: byModel,
             daily: daily,
             byProject: byProject
+        )
+
+        // Build recent sessions from the top N files by modDate (already read during analyze)
+        allFileInfos.sort { $0.modDate > $1.modDate }
+        let recentFiles = allFileInfos.prefix(recentLimit)
+        var sessions: [SessionInfo] = []
+
+        for fileInfo in recentFiles {
+            guard let data = try? Data(contentsOf: fileInfo.url),
+                  let content = String(data: data, encoding: .utf8)
+            else { continue }
+
+            var topic = ""
+            var firstTimestamp: Date?
+            var lastTimestamp: Date?
+            var cost: Double = 0
+            var messageCount = 0
+            var modelCounts: [String: Int] = [:]
+
+            content.enumerateLines { line, stop in
+                guard !line.isEmpty,
+                      let lineData = line.data(using: .utf8),
+                      let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData)
+                else { return }
+
+                if entry.type == "human" || entry.type == "user",
+                   let content = entry.message?.content {
+                    let trimmed = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty && (topic.isEmpty || (trimmed.count > topic.count && topic.count < 20)) {
+                        topic = String(trimmed.prefix(100))
+                    }
+                }
+
+                if entry.type == "assistant",
+                   let message = entry.message,
+                   let usage = message.usage,
+                   let model = message.model, model != "<synthetic>" {
+                    if let ts = entry.timestamp, let date = parseISO(ts) {
+                        if firstTimestamp == nil { firstTimestamp = date }
+                        lastTimestamp = date
+                    }
+                    let input = usage.inputTokens ?? 0
+                    let output = usage.outputTokens ?? 0
+                    let cacheCr = usage.cacheCreationInputTokens ?? 0
+                    let cacheRd = usage.cacheReadInputTokens ?? 0
+                    let price = ModelPricing.price(for: model)
+                    cost += Double(input) * price.input
+                        + Double(output) * price.output
+                        + Double(cacheCr) * price.cacheCreation
+                        + Double(cacheRd) * price.cacheRead
+                    messageCount += 1
+                    modelCounts[model, default: 0] += 1
+                }
+            }
+
+            guard messageCount > 0, let start = firstTimestamp else { continue }
+            let end = lastTimestamp ?? start
+            let primaryModel = modelCounts.max(by: { $0.value < $1.value })?.key ?? ""
+            let cleanTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\n", with: " ")
+            let displayTopic = cleanTopic.isEmpty ? "Untitled session" : cleanTopic
+            let stableID = fileInfo.url.deletingPathExtension().lastPathComponent
+            sessions.append(SessionInfo(
+                id: stableID,
+                projectName: fileInfo.projectName,
+                topic: displayTopic,
+                startTime: start,
+                duration: end.timeIntervalSince(start),
+                cost: cost,
+                messageCount: messageCount,
+                primaryModel: ModelPricing.shortName(for: primaryModel)
+            ))
+        }
+
+        return AnalysisResult(
+            stats: stats,
+            recentSessions: sessions.sorted { $0.startTime > $1.startTime }
         )
     }
 
@@ -571,8 +709,9 @@ class SessionAnalyzer {
             ) else { continue }
 
             for file in files where file.pathExtension == "jsonl" {
-                if let attrs = try? fm.attributesOfItem(atPath: file.path),
-                   let modDate = attrs[.modificationDate] as? Date {
+                // Use resourceValues from directory listing instead of extra stat() call
+                if let values = try? file.resourceValues(forKeys: [.contentModificationDateKey]),
+                   let modDate = values.contentModificationDate {
                     allFiles.append((url: file, modDate: modDate, projectName: projName))
                 }
             }
@@ -601,19 +740,20 @@ class SessionAnalyzer {
                       let lineData = line.data(using: .utf8)
                 else { return }
 
+                // Single decode per line — handles both user and assistant
+                guard let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData) else { return }
+
                 // Extract topic from first substantial human message (>20 chars)
-                if let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                   let type = json["type"] as? String, type == "human",
-                   let message = json["message"] as? [String: Any] {
-                    let trimmed = extractUserText(from: message)
+                if entry.type == "human" || entry.type == "user",
+                   let content = entry.message?.content {
+                    let trimmed = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty && (topic.isEmpty || (trimmed.count > topic.count && topic.count < 20)) {
                         topic = String(trimmed.prefix(100))
                     }
                 }
 
                 // Parse assistant messages for cost
-                if let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData),
-                   entry.type == "assistant",
+                if entry.type == "assistant",
                    let message = entry.message,
                    let usage = message.usage,
                    let model = message.model, model != "<synthetic>" {
@@ -665,32 +805,9 @@ class SessionAnalyzer {
         return sessions.sorted { $0.startTime > $1.startTime }
     }
 
-    /// Cost of the currently active session (most recently modified JSONL file)
-    static func activeSessionCost() -> (cost: Double, messages: Int, file: URL)? {
-        let fm = FileManager.default
-        guard let projectDirs = try? fm.contentsOfDirectory(
-            at: projectsDir, includingPropertiesForKeys: nil
-        ) else { return nil }
-
-        var newest: (url: URL, modDate: Date)? = nil
-        let threshold: TimeInterval = 60 // active within last 60s
-
-        for dir in projectDirs {
-            guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
-            for file in files where file.pathExtension == "jsonl" {
-                if let attrs = try? fm.attributesOfItem(atPath: file.path),
-                   let modDate = attrs[.modificationDate] as? Date,
-                   Date().timeIntervalSince(modDate) < threshold {
-                    if newest.map({ modDate > $0.modDate }) ?? true {
-                        newest = (file, modDate)
-                    }
-                }
-            }
-        }
-
-        guard let activeFile = newest else { return nil }
-
-        guard let data = try? Data(contentsOf: activeFile.url),
+    /// Compute cost for a specific JSONL file (used by active session detection)
+    static func sessionCost(for fileURL: URL) -> (cost: Double, messages: Int)? {
+        guard let data = try? Data(contentsOf: fileURL),
               let content = String(data: data, encoding: .utf8)
         else { return nil }
 
@@ -715,7 +832,7 @@ class SessionAnalyzer {
             messageCount += 1
         }
 
-        return messageCount > 0 ? (cost, messageCount, activeFile.url) : nil
+        return messageCount > 0 ? (cost, messageCount) : nil
     }
 }
 
@@ -792,12 +909,14 @@ extension SessionAnalyzer {
             ) else { continue }
 
             for file in files where file.pathExtension == "jsonl" {
-                // Quick filter: skip files not modified recently enough
-                if let attrs = try? fm.attributesOfItem(atPath: file.path),
-                   let modDate = attrs[.modificationDate] as? Date,
-                   modDate < (cal.date(byAdding: .day, value: -30, to: dayStart) ?? dayStart) {
-                    continue
-                }
+                // Use resourceValues from directory listing instead of extra stat() call
+                guard let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                      let modDate = values.contentModificationDate,
+                      modDate >= dayStart
+                else { continue }
+
+                // Skip files that are too large
+                if let fileSize = values.fileSize, UInt64(fileSize) > maxFileSize { continue }
 
                 guard let data = try? Data(contentsOf: file),
                       let content = String(data: data, encoding: .utf8)
@@ -814,12 +933,13 @@ extension SessionAnalyzer {
                           let lineData = line.data(using: .utf8)
                     else { return }
 
+                    // Single decode per line — handles both user and assistant
+                    guard let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData) else { return }
+
                     // Extract user messages for topic context
-                    if let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                       let type = json["type"] as? String,
-                       type == "human" || type == "user",
-                       let message = json["message"] as? [String: Any] {
-                        let trimmed = extractUserText(from: message)
+                    if entry.type == "human" || entry.type == "user",
+                       let content = entry.message?.content {
+                        let trimmed = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !trimmed.isEmpty {
                             lastUserText = String(trimmed.prefix(120))
                             if sessionTopic.isEmpty || (trimmed.count > sessionTopic.count && sessionTopic.count < 20) {
@@ -829,14 +949,12 @@ extension SessionAnalyzer {
                     }
 
                     // Parse assistant messages
-                    guard let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData),
-                          entry.type == "assistant",
+                    guard entry.type == "assistant",
                           let message = entry.message,
                           let usage = message.usage,
                           let model = message.model, model != "<synthetic>",
                           let tsStr = entry.timestamp,
                           let timestamp = parseISO(tsStr),
-                          // Only include messages with end_turn (final response, not streaming chunks)
                           (usage.outputTokens ?? 0) > 0
                     else { return }
 
@@ -879,6 +997,127 @@ extension SessionAnalyzer {
                 // Deterministic color from project name hash
                 let colorIndex = abs(projName.hashValue) % 8
 
+                let stableID = file.deletingPathExtension().lastPathComponent
+
+                sessions.append(TimelineSession(
+                    id: stableID,
+                    projectName: projName,
+                    topic: cleanTopic.isEmpty ? "Untitled session" : cleanTopic,
+                    startTime: sortedMsgs.first?.timestamp ?? Date(),
+                    endTime: sortedMsgs.last?.timestamp ?? Date(),
+                    cost: totalCost,
+                    messageCount: sortedMsgs.count,
+                    primaryModel: ModelPricing.shortName(for: primaryModel),
+                    messages: sortedMsgs,
+                    projectColor: colorIndex
+                ))
+            }
+        }
+
+        return sessions.sorted { $0.startTime > $1.startTime }
+    }
+
+    /// Parse ALL sessions within a date range in a single pass (avoids N×file reads)
+    static func allSessions(since startDate: Date, until endDate: Date = Date()) -> [TimelineSession] {
+        let fm = FileManager.default
+        let cal = Calendar.current
+
+        guard let projectDirs = try? fm.contentsOfDirectory(
+            at: projectsDir, includingPropertiesForKeys: nil
+        ) else { return [] }
+
+        var sessions: [TimelineSession] = []
+
+        for projectDir in projectDirs {
+            let dirName = projectDir.lastPathComponent
+            let projName = projectName(from: dirName)
+
+            guard let files = try? fm.contentsOfDirectory(
+                at: projectDir, includingPropertiesForKeys: [.contentModificationDateKey]
+            ) else { continue }
+
+            for file in files where file.pathExtension == "jsonl" {
+                // Use resourceValues from directory listing instead of extra stat() call
+                guard let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]) else { continue }
+
+                if let modDate = values.contentModificationDate,
+                   modDate < (cal.date(byAdding: .day, value: -1, to: startDate) ?? startDate) {
+                    continue
+                }
+
+                if let fileSize = values.fileSize, UInt64(fileSize) > maxFileSize { continue }
+
+                guard let data = try? Data(contentsOf: file),
+                      let content = String(data: data, encoding: .utf8)
+                else { continue }
+
+                var messages: [TimelineMessage] = []
+                var lastUserText = ""
+                var sessionTopic = ""
+                var modelCounts: [String: Int] = [:]
+
+                content.enumerateLines { line, _ in
+                    guard !line.isEmpty,
+                          let lineData = line.data(using: .utf8)
+                    else { return }
+
+                    // Single decode per line — handles both user and assistant
+                    guard let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData) else { return }
+
+                    if entry.type == "human" || entry.type == "user",
+                       let content = entry.message?.content {
+                        let trimmed = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty {
+                            lastUserText = String(trimmed.prefix(120))
+                            if sessionTopic.isEmpty || (trimmed.count > sessionTopic.count && sessionTopic.count < 20) {
+                                sessionTopic = String(trimmed.prefix(100))
+                            }
+                        }
+                    }
+
+                    guard entry.type == "assistant",
+                          let message = entry.message,
+                          let usage = message.usage,
+                          let model = message.model, model != "<synthetic>",
+                          let tsStr = entry.timestamp,
+                          let timestamp = parseISO(tsStr),
+                          (usage.outputTokens ?? 0) > 0
+                    else { return }
+
+                    guard timestamp >= startDate, timestamp <= endDate else { return }
+
+                    let input = usage.inputTokens ?? 0
+                    let output = usage.outputTokens ?? 0
+                    let cacheCr = usage.cacheCreationInputTokens ?? 0
+                    let cacheRd = usage.cacheReadInputTokens ?? 0
+
+                    let price = ModelPricing.price(for: model)
+                    let cost = Double(input) * price.input
+                        + Double(output) * price.output
+                        + Double(cacheCr) * price.cacheCreation
+                        + Double(cacheRd) * price.cacheRead
+
+                    modelCounts[model, default: 0] += 1
+
+                    messages.append(TimelineMessage(
+                        timestamp: timestamp,
+                        model: model,
+                        inputTokens: input + cacheCr + cacheRd,
+                        outputTokens: output,
+                        cost: cost,
+                        topic: lastUserText
+                    ))
+                }
+
+                guard !messages.isEmpty else { continue }
+
+                let sortedMsgs = messages.sorted { $0.timestamp < $1.timestamp }
+                let totalCost = sortedMsgs.reduce(0) { $0 + $1.cost }
+                let primaryModel = modelCounts.max(by: { $0.value < $1.value })?.key ?? ""
+                let cleanTopic = sessionTopic
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "\n", with: " ")
+                let colorIndex = abs(projName.hashValue) % 8
                 let stableID = file.deletingPathExtension().lastPathComponent
 
                 sessions.append(TimelineSession(

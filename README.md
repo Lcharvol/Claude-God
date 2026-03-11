@@ -129,9 +129,13 @@ Sources/
 ├── UsageManager.swift       # OAuth, auto-refresh, notifications, budget, active session
 ├── AuthManager.swift        # Credential loading, token refresh, file watcher
 ├── UpdateChecker.swift      # GitHub releases auto-update
-├── MenuBarView.swift        # UI: cards, stats, settings, shadcn components
-├── SessionAnalyzer.swift    # JSONL parser, cost calculator, project/session analysis
+├── HotkeyManager.swift      # Global ⌥⌘C hotkey (Carbon API)
+├── AppShortcuts.swift       # Shortcuts.app intents (Get Usage, Get Cost, Refresh)
+├── MenuBarView.swift        # UI: cards, stats, settings, heatmap, shadcn components
+├── SessionAnalyzer.swift    # JSONL parser, cost calculator, efficiency metrics
 └── Assets.xcassets/         # App icon
+Widget/
+└── ClaudeGodWidget.swift    # WidgetKit — desktop quota gauges
 ```
 
 **Zero external dependencies.** Foundation + SwiftUI + Combine + Security + UserNotifications + ServiceManagement.
@@ -139,7 +143,7 @@ Sources/
 ## Releasing
 
 ```bash
-git tag v2.5.0 && git push origin v2.5.0
+git tag v2.8.0 && git push origin v2.8.0
 # GitHub Actions builds the .dmg automatically
 ```
 
@@ -160,6 +164,19 @@ git tag v2.5.0 && git push origin v2.5.0
 - [x] VoiceOver accessibility
 - [x] Global keyboard shortcut (⌥⌘C)
 - [x] Homebrew cask distribution
+
+### v2.8.0
+
+- [x] macOS Desktop Widget (WidgetKit) — quota gauges on the desktop
+- [x] Usage heatmap — GitHub-style calendar showing daily usage intensity
+- [x] Live session cost — real-time cost counter for the active Claude Code session
+- [x] Week-over-week comparison — "This week vs last week" delta view
+- [x] Per-project budget — set a monthly $ limit per project with alerts
+- [x] Efficiency metrics — cost/message trend, avg tokens/session, cache hit rate
+- [x] Shortcuts.app integration — expose "Get usage" and "Refresh" as Shortcuts actions
+- [x] Multi-account support — switch between work/personal Claude accounts
+- [x] Custom alert rules — "Notify me when Opus 7d > 60%" with per-quota thresholds
+- [x] Session annotations — tag or star sessions for later reference
 
 ## License
 

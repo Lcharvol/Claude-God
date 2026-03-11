@@ -6,6 +6,7 @@ import Combine
 import SwiftUI
 import UserNotifications
 import ServiceManagement
+import WidgetKit
 
 // MARK: - Intervalle d'auto-refresh
 
@@ -56,6 +57,30 @@ enum MenuBarDisplayMode: Int, CaseIterable, Identifiable {
         case .allQuotas: return "C 15% | 31% | 22%"
         }
     }
+}
+
+// MARK: - Alert rule model
+
+struct AlertRule: Identifiable, Codable {
+    var id = UUID()
+    var quotaLabel: String  // e.g. "Opus (7d)", "Session (5h)"
+    var threshold: Double   // 0-100
+    var notified: Bool = false
+}
+
+// MARK: - Session annotation model
+
+struct SessionAnnotation: Codable {
+    var starred: Bool = false
+    var tag: String = ""
+}
+
+// MARK: - Multi-account model
+
+struct AccountInfo: Identifiable, Codable {
+    var id = UUID()
+    var label: String       // e.g. "Work", "Personal"
+    var credentialsPath: String
 }
 
 // MARK: - Seuils de couleur partagés
@@ -146,6 +171,9 @@ private enum Formatters {
 
 class UsageManager: ObservableObject {
 
+    /// Shared instance for AppIntents / Shortcuts access
+    static var shared: UsageManager!
+
     // MARK: - Sub-managers
 
     let auth = AuthManager()
@@ -178,6 +206,11 @@ class UsageManager: ObservableObject {
     @Published var lastRefresh: Date?
     @Published var timeUntilReset: String = "—"
 
+    // MARK: - Live session cost
+
+    @Published var activeSessionCost: Double = 0
+    @Published var activeSessionMessages: Int = 0
+
     // MARK: - Session stats
 
     @Published var todayStats = UsageStats()
@@ -190,6 +223,51 @@ class UsageManager: ObservableObject {
     // MARK: - Active session detection
 
     @Published var isSessionActive = false
+
+    // MARK: - Per-project budgets
+
+    @Published var projectBudgets: [String: Double] {
+        didSet {
+            if let data = try? JSONEncoder().encode(projectBudgets) {
+                UserDefaults.standard.set(data, forKey: "projectBudgets")
+            }
+        }
+    }
+
+    // MARK: - Custom alert rules
+
+    @Published var customAlertRules: [AlertRule] {
+        didSet {
+            if let data = try? JSONEncoder().encode(customAlertRules) {
+                UserDefaults.standard.set(data, forKey: "customAlertRules")
+            }
+        }
+    }
+
+    // MARK: - Session annotations
+
+    @Published var sessionAnnotations: [String: SessionAnnotation] {
+        didSet {
+            if let data = try? JSONEncoder().encode(sessionAnnotations) {
+                UserDefaults.standard.set(data, forKey: "sessionAnnotations")
+            }
+        }
+    }
+
+    // MARK: - Multi-account
+
+    @Published var accounts: [AccountInfo] {
+        didSet {
+            if let data = try? JSONEncoder().encode(accounts) {
+                UserDefaults.standard.set(data, forKey: "accounts")
+            }
+        }
+    }
+    @Published var activeAccountIndex: Int {
+        didSet {
+            UserDefaults.standard.set(activeAccountIndex, forKey: "activeAccountIndex")
+        }
+    }
 
     // MARK: - État de l'interface
 
@@ -383,6 +461,39 @@ class UsageManager: ObservableObject {
         self.menuBarDisplayMode = MenuBarDisplayMode(rawValue: savedDisplayMode) ?? .percentageAndTimer
         self.dailyBudget = UserDefaults.standard.double(forKey: "dailyBudget")
 
+        // Load per-project budgets
+        if let data = UserDefaults.standard.data(forKey: "projectBudgets"),
+           let decoded = try? JSONDecoder().decode([String: Double].self, from: data) {
+            self.projectBudgets = decoded
+        } else {
+            self.projectBudgets = [:]
+        }
+
+        // Load custom alert rules
+        if let data = UserDefaults.standard.data(forKey: "customAlertRules"),
+           let decoded = try? JSONDecoder().decode([AlertRule].self, from: data) {
+            self.customAlertRules = decoded
+        } else {
+            self.customAlertRules = []
+        }
+
+        // Load session annotations
+        if let data = UserDefaults.standard.data(forKey: "sessionAnnotations"),
+           let decoded = try? JSONDecoder().decode([String: SessionAnnotation].self, from: data) {
+            self.sessionAnnotations = decoded
+        } else {
+            self.sessionAnnotations = [:]
+        }
+
+        // Load accounts
+        if let data = UserDefaults.standard.data(forKey: "accounts"),
+           let decoded = try? JSONDecoder().decode([AccountInfo].self, from: data) {
+            self.accounts = decoded
+        } else {
+            self.accounts = []
+        }
+        self.activeAccountIndex = UserDefaults.standard.integer(forKey: "activeAccountIndex")
+
         // Forward objectWillChange from sub-managers
         auth.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
@@ -467,7 +578,11 @@ class UsageManager: ObservableObject {
             let fm = FileManager.default
             let projectsDir = SessionAnalyzer.projectsDir
             guard let dirs = try? fm.contentsOfDirectory(at: projectsDir, includingPropertiesForKeys: nil) else {
-                DispatchQueue.main.async { self?.isSessionActive = false }
+                DispatchQueue.main.async {
+                    self?.isSessionActive = false
+                    self?.activeSessionCost = 0
+                    self?.activeSessionMessages = 0
+                }
                 return
             }
 
@@ -480,12 +595,22 @@ class UsageManager: ObservableObject {
                     if let attrs = try? fm.attributesOfItem(atPath: file.path),
                        let modDate = attrs[.modificationDate] as? Date,
                        now.timeIntervalSince(modDate) < threshold {
-                        DispatchQueue.main.async { self?.isSessionActive = true }
+                        // Also compute live session cost
+                        let sessionData = SessionAnalyzer.activeSessionCost()
+                        DispatchQueue.main.async {
+                            self?.isSessionActive = true
+                            self?.activeSessionCost = sessionData?.cost ?? 0
+                            self?.activeSessionMessages = sessionData?.messages ?? 0
+                        }
                         return
                     }
                 }
             }
-            DispatchQueue.main.async { self?.isSessionActive = false }
+            DispatchQueue.main.async {
+                self?.isSessionActive = false
+                self?.activeSessionCost = 0
+                self?.activeSessionMessages = 0
+            }
         }
     }
 
@@ -582,6 +707,9 @@ class UsageManager: ObservableObject {
                     self.refreshStats()
                     self.checkNotifications()
                     self.checkResetNotifications()
+                    self.checkCustomAlerts()
+                    self.checkProjectBudgets()
+                    self.updateWidgetData()
 
                 case 401, 403:
                     if self.auth.refreshToken != nil {
@@ -804,6 +932,117 @@ class UsageManager: ObservableObject {
                 UNUserNotificationCenter.current().add(request)
                 print("[ClaudeGod] Reset notification sent for \(quota.label)")
             }
+        }
+    }
+
+    // MARK: - Custom alert rules check
+
+    private func checkCustomAlerts() {
+        guard notificationsEnabled else { return }
+        for i in customAlertRules.indices {
+            let rule = customAlertRules[i]
+            if let quota = quotas.first(where: { $0.label == rule.quotaLabel }),
+               quota.utilization >= rule.threshold && !rule.notified {
+                let content = UNMutableNotificationContent()
+                content.title = "Claude God"
+                content.body = "\(rule.quotaLabel): \(Int(quota.utilization))% used (alert at \(Int(rule.threshold))%)"
+                content.sound = .default
+                let request = UNNotificationRequest(
+                    identifier: "custom-alert-\(rule.id.uuidString)",
+                    content: content, trigger: nil
+                )
+                UNUserNotificationCenter.current().add(request)
+                customAlertRules[i].notified = true
+            } else if let quota = quotas.first(where: { $0.label == rule.quotaLabel }),
+                      quota.utilization < rule.threshold && rule.notified {
+                customAlertRules[i].notified = false
+            }
+        }
+    }
+
+    // MARK: - Per-project budget check
+
+    private func checkProjectBudgets() {
+        guard notificationsEnabled else { return }
+        for project in monthStats.byProject {
+            if let budget = projectBudgets[project.directoryName], budget > 0,
+               project.totalCost >= budget {
+                let key = "project-budget-\(project.directoryName)"
+                if !notifiedThresholds.contains(key) {
+                    let content = UNMutableNotificationContent()
+                    content.title = "Claude God"
+                    content.body = "\(project.projectName): monthly budget exceeded ($\(String(format: "%.2f", project.totalCost)) / $\(String(format: "%.0f", budget)))"
+                    content.sound = .default
+                    let request = UNNotificationRequest(
+                        identifier: key, content: content, trigger: nil
+                    )
+                    UNUserNotificationCenter.current().add(request)
+                    var updated = notifiedThresholds
+                    updated.insert(key)
+                    notifiedThresholds = updated
+                }
+            }
+        }
+    }
+
+    // MARK: - Session annotations
+
+    func toggleStar(sessionID: String) {
+        var ann = sessionAnnotations[sessionID] ?? SessionAnnotation()
+        ann.starred.toggle()
+        sessionAnnotations[sessionID] = ann
+    }
+
+    func setTag(sessionID: String, tag: String) {
+        var ann = sessionAnnotations[sessionID] ?? SessionAnnotation()
+        ann.tag = tag
+        sessionAnnotations[sessionID] = ann
+    }
+
+    func annotation(for sessionID: String) -> SessionAnnotation {
+        sessionAnnotations[sessionID] ?? SessionAnnotation()
+    }
+
+    // MARK: - Multi-account
+
+    func addAccount(label: String, path: String) {
+        accounts.append(AccountInfo(label: label, credentialsPath: path))
+    }
+
+    func switchAccount(index: Int) {
+        guard index >= 0 && index < accounts.count else { return }
+        activeAccountIndex = index
+        // Reload credentials from the selected account's path
+        // For now, accounts use the default credentials path
+        auth.loadCredentials()
+        quotas = []
+        refresh()
+    }
+
+    func removeAccount(at index: Int) {
+        guard index >= 0 && index < accounts.count else { return }
+        accounts.remove(at: index)
+        if activeAccountIndex >= accounts.count {
+            activeAccountIndex = max(0, accounts.count - 1)
+        }
+    }
+
+    // MARK: - Widget data sharing
+
+    private func updateWidgetData() {
+        let defaults = UserDefaults(suiteName: "group.com.lcharvol.claude-god") ?? .standard
+        let quotaData = quotas.enumerated().map { index, q in
+            ["utilization": q.utilization, "labelIndex": Double(index)]
+        }
+        if let data = try? JSONEncoder().encode(quotaData) {
+            defaults.set(data, forKey: "widgetQuotas")
+        }
+        defaults.set(todayStats.totalCost, forKey: "widgetTodayCost")
+        defaults.set(todayStats.totalMessages, forKey: "widgetTodayMessages")
+
+        // Trigger widget reload if available
+        if #available(macOS 14.0, *) {
+            WidgetCenter.shared.reloadAllTimelines()
         }
     }
 

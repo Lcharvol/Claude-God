@@ -322,6 +322,90 @@ struct MenuBarView: View {
                 }
             }
 
+            // Custom alert rules
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        SHLabel("Custom Alerts")
+                        Spacer()
+                        if !manager.quotas.isEmpty {
+                            SHButton(label: "Add", icon: "plus", style: .ghost) {
+                                let defaultQuota = manager.quotas.first?.label ?? "Session (5h)"
+                                manager.customAlertRules.append(AlertRule(quotaLabel: defaultQuota, threshold: 80))
+                            }
+                        }
+                    }
+                    if manager.customAlertRules.isEmpty {
+                        Text("No custom alerts. Add one to get notified at specific quota thresholds.")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(Array(manager.customAlertRules.enumerated()), id: \.element.id) { index, rule in
+                            HStack(spacing: 6) {
+                                Text(rule.quotaLabel)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .lineLimit(1)
+                                Spacer()
+                                Text("at \(Int(rule.threshold))%")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                Button {
+                                    manager.customAlertRules.remove(at: index)
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Multi-account
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        SHLabel("Accounts")
+                        Spacer()
+                        SHButton(label: "Add", icon: "plus", style: .ghost) {
+                            let label = manager.accounts.isEmpty ? "Default" : "Account \(manager.accounts.count + 1)"
+                            manager.addAccount(label: label, path: AuthManager.credentialsPath.path)
+                        }
+                    }
+                    if manager.accounts.isEmpty {
+                        Text("Using default credentials. Add accounts to switch between profiles.")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(Array(manager.accounts.enumerated()), id: \.element.id) { index, account in
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(index == manager.activeAccountIndex ? Color.green : Theme.border)
+                                    .frame(width: 6, height: 6)
+                                Text(account.label)
+                                    .font(.system(size: 11, weight: index == manager.activeAccountIndex ? .semibold : .regular))
+                                Spacer()
+                                if index != manager.activeAccountIndex {
+                                    SHButton(label: "Switch", style: .ghost) {
+                                        manager.switchAccount(index: index)
+                                    }
+                                }
+                                Button {
+                                    manager.removeAccount(at: index)
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Display + System
             SHCard {
                 VStack(alignment: .leading, spacing: 8) {
@@ -418,6 +502,36 @@ struct MenuBarView: View {
                         }
                     }
                 }
+            }
+
+            // Live session cost
+            if manager.isSessionActive && manager.activeSessionCost > 0 {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 6, height: 6)
+                    Text("Active session")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(manager.activeSessionMessages) msgs")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                    Text(formatCost(manager.activeSessionCost))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.green)
+                        .contentTransition(.numericText())
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                        .strokeBorder(Color.green.opacity(0.15), lineWidth: 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                                .fill(Color.green.opacity(0.05))
+                        )
+                )
             }
 
             // Burn rate prediction
@@ -674,26 +788,42 @@ struct MenuBarView: View {
                     }
                 }
 
-                // Projects
+                // Projects with budget
                 if !manager.monthStats.byProject.isEmpty {
                     SHCard {
                         VStack(alignment: .leading, spacing: 8) {
                             SHLabel("Projects")
                             ForEach(manager.monthStats.byProject.prefix(5)) { project in
-                                HStack(spacing: 6) {
-                                    Image(systemName: "folder.fill")
-                                        .font(.system(size: 8, weight: .medium))
-                                        .foregroundColor(Theme.accent.opacity(0.6))
-                                    Text(project.projectName)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .lineLimit(1)
-                                    Spacer()
-                                    Text("\(project.totalMessages) msgs")
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundColor(.secondary)
-                                    Text(formatCost(project.totalCost))
-                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                        .frame(width: 48, alignment: .trailing)
+                                VStack(spacing: 3) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "folder.fill")
+                                            .font(.system(size: 8, weight: .medium))
+                                            .foregroundColor(Theme.accent.opacity(0.6))
+                                        Text(project.projectName)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text("\(project.totalMessages) msgs")
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                        Text(formatCost(project.totalCost))
+                                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                            .frame(width: 48, alignment: .trailing)
+                                    }
+                                    // Project budget bar
+                                    if let budget = manager.projectBudgets[project.directoryName], budget > 0 {
+                                        let util = min(project.totalCost / budget, 1.0)
+                                        GeometryReader { geo in
+                                            ZStack(alignment: .leading) {
+                                                RoundedRectangle(cornerRadius: 2).fill(Theme.muted)
+                                                RoundedRectangle(cornerRadius: 2)
+                                                    .fill(util >= 1.0 ? Color.red : util >= 0.8 ? Color.orange : Theme.accent.opacity(0.5))
+                                                    .frame(width: max(0, geo.size.width * CGFloat(util)))
+                                            }
+                                        }
+                                        .frame(height: 3)
+                                        .help("\(formatCost(project.totalCost)) / $\(String(format: "%.0f", budget)) monthly budget")
+                                    }
                                 }
                                 .help("\(project.projectName): \(project.sessionCount) sessions · \(project.totalMessages) messages · \(formatCost(project.totalCost))")
                             }
@@ -701,7 +831,16 @@ struct MenuBarView: View {
                     }
                 }
 
-                // Recent sessions
+                // Week-over-week comparison
+                weekComparisonView
+
+                // Efficiency metrics
+                efficiencyView
+
+                // Heatmap
+                heatmapView
+
+                // Recent sessions (with annotations)
                 if !manager.sessionHistory.isEmpty {
                     SHCard {
                         VStack(alignment: .leading, spacing: 8) {
@@ -709,10 +848,33 @@ struct MenuBarView: View {
                             ForEach(manager.sessionHistory.prefix(5)) { session in
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(spacing: 4) {
+                                        // Star button
+                                        Button {
+                                            manager.toggleStar(sessionID: session.id)
+                                        } label: {
+                                            Image(systemName: manager.annotation(for: session.id).starred ? "star.fill" : "star")
+                                                .font(.system(size: 8))
+                                                .foregroundColor(manager.annotation(for: session.id).starred ? .yellow : .secondary.opacity(0.4))
+                                        }
+                                        .buttonStyle(.plain)
+
                                         Text(session.topic)
                                             .font(.system(size: 10, weight: .medium))
                                             .lineLimit(1)
                                         Spacer()
+
+                                        // Tag
+                                        if !manager.annotation(for: session.id).tag.isEmpty {
+                                            Text(manager.annotation(for: session.id).tag)
+                                                .font(.system(size: 8, weight: .medium))
+                                                .foregroundColor(Theme.accent)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(
+                                                    Capsule().fill(Theme.accentMuted)
+                                                )
+                                        }
+
                                         Text(formatCost(session.cost))
                                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                                     }
@@ -819,6 +981,133 @@ struct MenuBarView: View {
                     }
 
                     Spacer()
+                }
+            }
+        }
+    }
+
+    // MARK: - Week comparison
+
+    @ViewBuilder
+    private var weekComparisonView: some View {
+        let comp = manager.monthStats.weekComparison
+        if comp.thisWeekCost > 0 || comp.lastWeekCost > 0 {
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    SHLabel("Week over Week")
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("This week")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                            Text(formatCost(comp.thisWeekCost))
+                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Last week")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                            Text(formatCost(comp.lastWeekCost))
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("Delta")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 2) {
+                                Image(systemName: comp.costDelta >= 0 ? "arrow.up.right" : "arrow.down.right")
+                                    .font(.system(size: 9, weight: .bold))
+                                Text("\(String(format: "%.0f", abs(comp.costDeltaPercent)))%")
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            }
+                            .foregroundColor(comp.costDelta >= 0 ? .orange : .green)
+                        }
+                    }
+                    // Message delta
+                    HStack(spacing: 4) {
+                        Text("\(comp.thisWeekMessages) msgs this week")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                        if comp.messageDelta != 0 {
+                            Text("(\(comp.messageDelta > 0 ? "+" : "")\(comp.messageDelta))")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(comp.messageDelta > 0 ? .orange : .green)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Efficiency metrics
+
+    @ViewBuilder
+    private var efficiencyView: some View {
+        let eff = manager.monthStats.efficiency(sessionCount: manager.monthStats.sessionCount)
+        if manager.monthStats.totalMessages > 0 {
+            SHCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    SHLabel("Efficiency")
+                    HStack(spacing: 0) {
+                        VStack(spacing: 2) {
+                            Text(eff.costPerMessage >= 0.01 ? String(format: "$%.2f", eff.costPerMessage) : String(format: "$%.3f", eff.costPerMessage))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            Text("$/msg")
+                                .font(.system(size: 8))
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        Rectangle().fill(Theme.border).frame(width: 1, height: 28)
+
+                        VStack(spacing: 2) {
+                            Text(formatTokens(eff.avgTokensPerSession))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            Text("tok/session")
+                                .font(.system(size: 8))
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        Rectangle().fill(Theme.border).frame(width: 1, height: 28)
+
+                        VStack(spacing: 2) {
+                            Text(String(format: "%.0f%%", eff.cacheHitRate))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            Text("cache hit")
+                                .font(.system(size: 8))
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    // Trend indicator
+                    if abs(eff.costPerMessageTrend) > 0.001 {
+                        HStack(spacing: 4) {
+                            Image(systemName: eff.costPerMessageTrend > 0 ? "arrow.up.right" : "arrow.down.right")
+                                .font(.system(size: 8, weight: .bold))
+                            Text("Cost/msg \(eff.costPerMessageTrend > 0 ? "increasing" : "decreasing")")
+                                .font(.system(size: 9))
+                        }
+                        .foregroundColor(eff.costPerMessageTrend > 0 ? .orange : .green)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Heatmap
+
+    @ViewBuilder
+    private var heatmapView: some View {
+        let days = manager.monthStats.heatmap(days: 56) // 8 weeks
+        if !days.isEmpty {
+            SHCard {
+                VStack(alignment: .leading, spacing: 6) {
+                    SHLabel("Activity")
+                    HeatmapGrid(days: days)
+                        .frame(height: 62)
                 }
             }
         }
@@ -1279,6 +1568,73 @@ struct SparklineView: View {
                     hoveredIndex = nil
                 }
             }
+        }
+    }
+}
+
+// MARK: - Heatmap Grid (GitHub-style)
+
+struct HeatmapGrid: View {
+    let days: [HeatmapDay]
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let cellSize: CGFloat = 7
+    private let spacing: CGFloat = 2
+
+    private var maxCost: Double {
+        days.map(\.cost).max() ?? 1
+    }
+
+    private func color(for day: HeatmapDay) -> Color {
+        let level = day.intensity(maxCost: maxCost)
+        let base = Color(red: 0.56, green: 0.39, blue: 0.98)
+        switch level {
+        case 0: return colorScheme == .dark ? Color.primary.opacity(0.06) : Color.primary.opacity(0.04)
+        case 1: return base.opacity(0.25)
+        case 2: return base.opacity(0.45)
+        case 3: return base.opacity(0.7)
+        default: return base.opacity(0.95)
+        }
+    }
+
+    var body: some View {
+        let weeks = stride(from: 0, to: days.count, by: 7).map {
+            Array(days[$0..<min($0 + 7, days.count)])
+        }
+
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: spacing) {
+                ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
+                    VStack(spacing: spacing) {
+                        ForEach(week) { day in
+                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .fill(color(for: day))
+                                .frame(width: cellSize, height: cellSize)
+                                .help(day.cost > 0
+                                    ? "\(SessionAnalyzer.dayLabelFormatter.string(from: day.date)): \(day.cost >= 0.01 ? String(format: "$%.2f", day.cost) : String(format: "$%.3f", day.cost)) · \(day.messageCount) msgs"
+                                    : "\(SessionAnalyzer.dayLabelFormatter.string(from: day.date)): no activity")
+                        }
+                    }
+                }
+            }
+            // Legend
+            HStack(spacing: 3) {
+                Spacer()
+                Text("Less")
+                    .font(.system(size: 7))
+                    .foregroundColor(.secondary)
+                ForEach(0..<5) { level in
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(level == 0
+                            ? (colorScheme == .dark ? Color.primary.opacity(0.06) : Color.primary.opacity(0.04))
+                            : Color(red: 0.56, green: 0.39, blue: 0.98).opacity(Double(level) * 0.25))
+                        .frame(width: 7, height: 7)
+                }
+                Text("More")
+                    .font(.system(size: 7))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, 4)
         }
     }
 }

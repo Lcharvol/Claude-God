@@ -120,7 +120,7 @@ struct ProjectUsage: Identifiable {
 }
 
 struct SessionInfo: Identifiable {
-    let id = UUID()
+    let id: String  // stable ID based on file name
     let projectName: String
     let topic: String
     let startTime: Date
@@ -141,6 +141,47 @@ struct SessionInfo: Identifiable {
     var timeLabel: String {
         SessionAnalyzer.timeLabelFormatter.string(from: startTime)
     }
+}
+
+struct HeatmapDay: Identifiable {
+    let id = UUID()
+    let date: Date
+    let cost: Double
+    let messageCount: Int
+
+    /// Intensity 0-4 (GitHub-style)
+    func intensity(maxCost: Double) -> Int {
+        guard maxCost > 0 else { return 0 }
+        let ratio = cost / maxCost
+        if ratio == 0 { return 0 }
+        if ratio < 0.25 { return 1 }
+        if ratio < 0.5 { return 2 }
+        if ratio < 0.75 { return 3 }
+        return 4
+    }
+}
+
+struct EfficiencyMetrics {
+    var costPerMessage: Double = 0
+    var avgTokensPerSession: Int = 0
+    var cacheHitRate: Double = 0 // percentage
+    var costPerMessageTrend: Double = 0 // positive = increasing
+
+    static let empty = EfficiencyMetrics()
+}
+
+struct WeekComparison {
+    var thisWeekCost: Double = 0
+    var lastWeekCost: Double = 0
+    var thisWeekMessages: Int = 0
+    var lastWeekMessages: Int = 0
+
+    var costDelta: Double { thisWeekCost - lastWeekCost }
+    var costDeltaPercent: Double {
+        guard lastWeekCost > 0 else { return thisWeekCost > 0 ? 100 : 0 }
+        return (costDelta / lastWeekCost) * 100
+    }
+    var messageDelta: Int { thisWeekMessages - lastWeekMessages }
 }
 
 struct UsageStats {
@@ -164,6 +205,77 @@ struct UsageStats {
             byModel: [],
             daily: filteredDaily,
             byProject: []
+        )
+    }
+
+    /// Generate heatmap data for last N days
+    func heatmap(days: Int = 90) -> [HeatmapDay] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let dailyMap = Dictionary(uniqueKeysWithValues: daily.map { (cal.startOfDay(for: $0.date), $0) })
+
+        return (0..<days).reversed().map { offset in
+            let date = cal.date(byAdding: .day, value: -offset, to: today)!
+            if let day = dailyMap[date] {
+                return HeatmapDay(date: date, cost: day.cost, messageCount: day.messageCount)
+            }
+            return HeatmapDay(date: date, cost: 0, messageCount: 0)
+        }
+    }
+
+    /// Week-over-week comparison
+    var weekComparison: WeekComparison {
+        let cal = Calendar.current
+        let now = Date()
+        let thisWeekStart = cal.startOfDay(for: cal.date(byAdding: .day, value: -7, to: now)!)
+        let lastWeekStart = cal.startOfDay(for: cal.date(byAdding: .day, value: -14, to: now)!)
+
+        var comp = WeekComparison()
+        for day in daily {
+            let dayStart = cal.startOfDay(for: day.date)
+            if dayStart >= thisWeekStart {
+                comp.thisWeekCost += day.cost
+                comp.thisWeekMessages += day.messageCount
+            } else if dayStart >= lastWeekStart {
+                comp.lastWeekCost += day.cost
+                comp.lastWeekMessages += day.messageCount
+            }
+        }
+        return comp
+    }
+
+    /// Efficiency metrics
+    func efficiency(sessionCount: Int) -> EfficiencyMetrics {
+        guard totalMessages > 0 else { return .empty }
+        let costPerMsg = totalCost / Double(totalMessages)
+        let avgTokens = sessionCount > 0 ? totalTokens.totalTokens / sessionCount : 0
+        let totalRead = totalTokens.cacheReadTokens
+        let totalCreated = totalTokens.cacheCreationTokens
+        let cacheHit = (totalRead + totalCreated) > 0
+            ? Double(totalRead) / Double(totalRead + totalCreated) * 100
+            : 0
+
+        // Trend: compare first half vs second half of daily data
+        var trend: Double = 0
+        if daily.count >= 4 {
+            let sorted = daily.sorted { $0.date < $1.date }
+            let mid = sorted.count / 2
+            let firstHalf = sorted[0..<mid]
+            let secondHalf = sorted[mid...]
+            let firstMsgs = firstHalf.reduce(0) { $0 + $1.messageCount }
+            let secondMsgs = secondHalf.reduce(0) { $0 + $1.messageCount }
+            let firstCost = firstHalf.reduce(0.0) { $0 + $1.cost }
+            let secondCost = secondHalf.reduce(0.0) { $0 + $1.cost }
+            let firstCPM = firstMsgs > 0 ? firstCost / Double(firstMsgs) : 0
+            let secondCPM = secondMsgs > 0 ? secondCost / Double(secondMsgs) : 0
+            trend = secondCPM - firstCPM
+        }
+
+        return EfficiencyMetrics(
+            costPerMessage: costPerMsg,
+            avgTokensPerSession: avgTokens,
+            cacheHitRate: cacheHit,
+            costPerMessageTrend: trend
         )
     }
 }
@@ -471,7 +583,9 @@ class SessionAnalyzer {
                 .replacingOccurrences(of: "\n", with: " ")
             let displayTopic = cleanTopic.isEmpty ? "Untitled session" : cleanTopic
 
+            let stableID = fileInfo.url.deletingPathExtension().lastPathComponent
             sessions.append(SessionInfo(
+                id: stableID,
                 projectName: fileInfo.projectName,
                 topic: displayTopic,
                 startTime: start,
@@ -483,6 +597,59 @@ class SessionAnalyzer {
         }
 
         return sessions.sorted { $0.startTime > $1.startTime }
+    }
+
+    /// Cost of the currently active session (most recently modified JSONL file)
+    static func activeSessionCost() -> (cost: Double, messages: Int, file: URL)? {
+        let fm = FileManager.default
+        guard let projectDirs = try? fm.contentsOfDirectory(
+            at: projectsDir, includingPropertiesForKeys: nil
+        ) else { return nil }
+
+        var newest: (url: URL, modDate: Date)? = nil
+        let threshold: TimeInterval = 60 // active within last 60s
+
+        for dir in projectDirs {
+            guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+            for file in files where file.pathExtension == "jsonl" {
+                if let attrs = try? fm.attributesOfItem(atPath: file.path),
+                   let modDate = attrs[.modificationDate] as? Date,
+                   Date().timeIntervalSince(modDate) < threshold {
+                    if newest == nil || modDate > newest!.modDate {
+                        newest = (file, modDate)
+                    }
+                }
+            }
+        }
+
+        guard let activeFile = newest else { return nil }
+
+        guard let data = try? Data(contentsOf: activeFile.url),
+              let content = String(data: data, encoding: .utf8)
+        else { return nil }
+
+        var cost: Double = 0
+        var messageCount = 0
+
+        content.enumerateLines { line, _ in
+            guard !line.isEmpty,
+                  let lineData = line.data(using: .utf8),
+                  let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData),
+                  entry.type == "assistant",
+                  let message = entry.message,
+                  let usage = message.usage,
+                  let model = message.model, model != "<synthetic>"
+            else { return }
+
+            let price = ModelPricing.price(for: model)
+            cost += Double(usage.inputTokens ?? 0) * price.input
+                + Double(usage.outputTokens ?? 0) * price.output
+                + Double(usage.cacheCreationInputTokens ?? 0) * price.cacheCreation
+                + Double(usage.cacheReadInputTokens ?? 0) * price.cacheRead
+            messageCount += 1
+        }
+
+        return messageCount > 0 ? (cost, messageCount, activeFile.url) : nil
     }
 }
 

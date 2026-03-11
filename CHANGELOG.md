@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.8.0] - 2026-03-11
+
+### Added
+- macOS Desktop Widget (WidgetKit) — quota gauges on the desktop with auto-refresh
+- Usage heatmap — GitHub-style calendar showing 8 weeks of daily usage intensity
+- Live session cost — real-time cost counter and message count for active Claude Code session
+- Week-over-week comparison — cost and message delta view (this week vs last week)
+- Per-project monthly budget — set $/month per project with progress bars and alert notifications
+- Efficiency metrics — cost/message, tokens/session, cache hit rate, and trend indicator
+- Shortcuts.app integration — "Get Claude Usage", "Get Claude Cost", "Refresh Claude" actions
+- Multi-account support — add/switch/remove Claude credential profiles in Settings
+- Custom alert rules — per-quota threshold notifications (e.g. "Opus 7d > 60%")
+- Session annotations — star and tag sessions for later reference
+
 ## [2.7.0] - 2026-03-11
 
 ### Added

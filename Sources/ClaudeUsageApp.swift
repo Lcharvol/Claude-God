@@ -5,9 +5,12 @@ import SwiftUI
 
 @main
 struct ClaudeGodApp: App {
-    @StateObject private var manager = UsageManager()
+    @StateObject private var manager: UsageManager
 
     init() {
+        let mgr = UsageManager()
+        UsageManager.shared = mgr
+        _manager = StateObject(wrappedValue: mgr)
         HotkeyManager.shared.register()
     }
 

@@ -835,9 +835,10 @@ struct MenuBarView: View {
                                         Text("\(project.totalMessages) msgs")
                                             .font(.system(size: 9, design: .monospaced))
                                             .foregroundColor(.secondary)
-                                        Text(formatCost(project.totalCost))
+                                        Text(formatCostCompact(project.totalCost))
                                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                            .frame(width: 48, alignment: .trailing)
+                                            .lineLimit(1)
+                                            .fixedSize()
                                     }
                                     // Project budget bar
                                     if let budget = manager.projectBudgets[project.directoryName], budget > 0 {

@@ -1030,29 +1030,71 @@
 
         @media (max-width: 768px) {
             .nav-links a:not(.nav-cta) { display: none; }
+            nav { padding: 0.75rem 1rem; }
 
-            .features-grid {
-                grid-template-columns: 1fr;
+            .hero { padding: 7rem 1.25rem 3rem; }
+            .hero-content { padding: 0; }
+            h1 { font-size: clamp(2rem, 8vw, 3rem); margin-bottom: 1rem; }
+            .hero-sub { font-size: 1rem; margin-bottom: 2rem; line-height: 1.6; }
+            .hero-badge { font-size: 0.72rem; margin-bottom: 1.5rem; }
+            .hero-note { font-size: 0.72rem; }
+
+            .hero-install { margin-bottom: 1.5rem; }
+            .install-cmd {
+                font-size: 0.65rem;
+                padding: 0.6rem 0.8rem;
+                word-break: break-all;
+                white-space: normal;
+                line-height: 1.4;
+                text-align: left;
             }
 
-            .how-grid {
-                grid-template-columns: 1fr;
-                gap: 2.5rem;
-            }
+            .features-grid { grid-template-columns: 1fr; }
+            .how-grid { grid-template-columns: 1fr; gap: 2.5rem; }
+
+            .section { padding: 4rem 1.25rem; }
+            .section-title { font-size: clamp(1.5rem, 5vw, 2rem); }
+            .section-desc { font-size: 0.9rem; }
 
             .mac-bar { display: none; }
             .popover-container { justify-content: center; padding-right: 0; }
             .popover-arrow { display: none; }
+            .popover { width: 100%; max-width: 300px; }
             .gauges-row { gap: 0.5rem; }
+            .mockup-section { margin-top: 2.5rem; }
 
-            .oss-stats { gap: 1.5rem; }
-            .oss-banner { padding: 2rem 1.5rem; }
+            .oss-stats { gap: 1rem; flex-wrap: wrap; justify-content: center; }
+            .oss-stat .num { font-size: 1.5rem; }
+            .oss-banner { padding: 2rem 1.25rem; }
+            .oss-actions code.install-cmd { font-size: 0.6rem !important; }
+
+            .feat { padding: 1.25rem; }
+
+            #faq details summary { font-size: 0.88rem; }
+            #faq details p { font-size: 0.82rem; }
         }
 
         @media (max-width: 480px) {
-            .hero { padding-top: 6rem; }
-            .hero-actions { flex-direction: column; align-items: center; }
-            .btn { width: 100%; max-width: 280px; justify-content: center; }
+            .hero { padding-top: 5.5rem; }
+            h1 { font-size: 1.75rem; }
+            .hero-sub { font-size: 0.92rem; }
+            .hero-actions { flex-direction: column; align-items: stretch; }
+            .btn { width: 100%; justify-content: center; padding: 0.85rem 1.5rem; font-size: 0.88rem; }
+            .hero-install .install-cmd { font-size: 0.58rem; }
+
+            .nav-cta { font-size: 0.78rem; padding: 0.5rem 1rem; }
+
+            .popover { max-width: 260px; }
+            .popover-inner { padding: 1rem; }
+            .gauge-ring, .gauge-ring svg { width: 46px; height: 46px; }
+            .gauge-pct { font-size: 0.7rem; }
+            .gauge-label { font-size: 0.58rem; }
+
+            .oss-stats { gap: 0.75rem; }
+            .oss-stat .num { font-size: 1.25rem; }
+            .oss-stat .lbl { font-size: 0.65rem; }
+            .oss-actions div { flex-direction: column !important; gap: 0.75rem !important; }
+            .oss-actions .btn { font-size: 0.82rem; }
         }
     </style>
 </head>

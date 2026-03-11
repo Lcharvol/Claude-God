@@ -365,7 +365,7 @@ struct MenuBarView: View {
                         }
                     }
                     HStack(spacing: 8) {
-                        Text("⌘R Refresh · ⌘1 Usage · ⌘2 Analytics")
+                        Text("⌥⌘C Toggle · ⌘R Refresh · ⌘1 Usage · ⌘2 Analytics")
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundColor(.secondary.opacity(0.6))
                     }

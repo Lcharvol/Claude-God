@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.7.0] - 2026-03-11
+
+### Added
+- Global keyboard shortcut `⌥⌘C` to toggle the popover from anywhere (Carbon hotkey API)
+- Homebrew cask distribution: `brew tap lcharvol/tap && brew install --cask claude-god`
+
 ## [2.6.0] - 2026-03-11
 
 ### Added

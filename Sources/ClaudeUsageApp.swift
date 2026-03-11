@@ -7,6 +7,10 @@ import SwiftUI
 struct ClaudeGodApp: App {
     @StateObject private var manager = UsageManager()
 
+    init() {
+        HotkeyManager.shared.register()
+    }
+
     var body: some Scene {
         MenuBarExtra {
             MenuBarView(manager: manager)

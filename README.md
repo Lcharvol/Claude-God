@@ -65,17 +65,30 @@
 
 ## Quick Start
 
+### Homebrew (recommended)
+
+```bash
+brew tap lcharvol/tap
+brew install --cask claude-god
+```
+
+### Manual
+
 ```bash
 # 1. Download & install
 open https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg
 
 # 2. Allow unsigned app (required once)
 xattr -cr /Applications/Claude\ God.app
+```
 
-# 3. Make sure you're logged in
+### Then
+
+```bash
+# Make sure you're logged in
 claude login
 
-# 4. Launch — a "C" icon appears in the menu bar
+# Launch — a "C" icon appears in the menu bar, press ⌥⌘C to toggle
 open /Applications/Claude\ God.app
 ```
 
@@ -145,8 +158,8 @@ git tag v2.5.0 && git push origin v2.5.0
 - [x] Reset notifications
 - [x] Auto-detect credentials
 - [x] VoiceOver accessibility
-- [ ] Global keyboard shortcut (⌥⌘C)
-- [ ] Homebrew cask distribution
+- [x] Global keyboard shortcut (⌥⌘C)
+- [x] Homebrew cask distribution
 
 ## License
 

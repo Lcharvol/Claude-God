@@ -182,6 +182,26 @@
             border-color: var(--accent) !important;
         }
 
+        .nav-star {
+            display: inline-flex !important;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.9rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--text-2) !important;
+            font-size: 0.82rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .nav-star:hover {
+            border-color: #fbbf24;
+            color: #fbbf24 !important;
+            background: rgba(251, 191, 36, 0.08);
+        }
+
         /* ============================================
            HERO
            ============================================ */
@@ -379,6 +399,19 @@
             border-color: var(--border-light);
             background: var(--surface);
             transform: translateY(-2px);
+        }
+
+        .btn-star {
+            background: transparent;
+            color: #fbbf24;
+            border: 1px solid rgba(251, 191, 36, 0.4);
+        }
+
+        .btn-star:hover {
+            border-color: #fbbf24;
+            background: rgba(251, 191, 36, 0.1);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(251, 191, 36, 0.15);
         }
 
         .hero-install {
@@ -979,7 +1012,10 @@
         <div class="nav-links">
             <a href="#features">Features</a>
             <a href="#setup">Setup</a>
-            <a href="https://github.com/Lcharvol/Claude-God" target="_blank">GitHub</a>
+            <a href="https://github.com/Lcharvol/Claude-God" target="_blank" class="nav-star">
+                <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" style="flex-shrink:0"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                Star <span id="nav-stars" style="opacity:0.6"></span>
+            </a>
             <a href="https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg" class="nav-cta">Download <span id="nav-version"></span></a>
         </div>
     </div>
@@ -1023,9 +1059,9 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17V3"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg>
                 Download .dmg <span id="hero-version" style="opacity:0.7;font-weight:400"></span>
             </a>
-            <a href="https://github.com/Lcharvol/Claude-God" target="_blank" class="btn btn-ghost">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-                View Source
+            <a href="https://github.com/Lcharvol/Claude-God" target="_blank" class="btn btn-star">
+                <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 .587l3.668 7.431 8.2 1.192-5.934 5.787 1.4 8.168L12 19.896l-7.334 3.858 1.4-8.168L.132 9.798l8.2-1.192z"/></svg>
+                Star on GitHub <span id="hero-stars" style="opacity:0.7;font-size:0.85em"></span>
             </a>
         </div>
 
@@ -1315,7 +1351,19 @@
         }, 600);
     });
 
-    // Fetch latest version from GitHub
+    // Fetch repo info from GitHub (version + stars)
+    fetch('https://api.github.com/repos/Lcharvol/Claude-God')
+        .then(r => r.json())
+        .then(d => {
+            // Star count
+            if (d.stargazers_count !== undefined) {
+                const stars = d.stargazers_count;
+                const label = stars >= 1000 ? (stars / 1000).toFixed(1) + 'k' : String(stars);
+                document.querySelectorAll('#nav-stars, #hero-stars').forEach(el => el.textContent = '(' + label + ')');
+            }
+        })
+        .catch(() => {});
+
     fetch('https://api.github.com/repos/Lcharvol/Claude-God/releases/latest')
         .then(r => r.json())
         .then(d => {

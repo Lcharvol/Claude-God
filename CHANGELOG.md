@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.9.0] - 2026-03-11
+
+### Fixed
+- Token refresh race condition — prevent concurrent refresh requests
+- Notification spam on oscillating quotas — added hysteresis (must drop 5-10% to re-arm)
+- Reset timer stuck on "now" — auto-refreshes 3s after quota reset
+- Multi-account switch flash — keep old data until new quotas arrive
+- Menu bar timer overflow — compact format (2h31m instead of 2h 31m 45s)
+- Session topic shows "test" — now picks first substantial message (>20 chars)
+- Budget field shows $0 — now displays "Not set" placeholder
+- CSV export silent failure — button shows "Saved!" or "Failed" feedback
+- Duplicate custom alert rules — prevents adding same quota/threshold combo
+- Models section layout — aggregate by short name, wider cost column, compact formatting
+
+### Improved
+- Active session polling reduced from 10s to 15s
+- Stats refresh cancels previous in-flight work on rapid clicks
+- Efficiency trend requires 10+ days of data (was 4, too noisy)
+- Hotkey failure shown as warning in Settings
+- Menu bar icon: warning (70% opacity) vs critical (full) visually distinct
+- 429 rate limit auto-retries 3 times instead of showing error immediately
+- Unknown model pricing logs a warning instead of silent fallback
+
 ## [2.8.0] - 2026-03-11
 
 ### Added

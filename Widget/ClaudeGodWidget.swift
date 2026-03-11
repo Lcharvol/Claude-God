@@ -44,7 +44,7 @@ struct ClaudeGodProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<QuotaEntry>) -> Void) {
         let entry = makeEntry()
         // Refresh every 5 minutes
-        let nextUpdate = Calendar.current.date(byAdding: .minute, value: 5, to: Date())!
+        let nextUpdate = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
         completion(Timeline(entries: [entry], policy: .after(nextUpdate)))
     }
 
@@ -61,8 +61,10 @@ struct ClaudeGodProvider: TimelineProvider {
                 let util = dict["utilization"] ?? 0
                 let color: Color = util < 50 ? .green : util < 80 ? .orange : .red
                 return QuotaInfo(
-                    label: dict["labelIndex"].map { idx in
-                        ["Session", "Weekly", "Sonnet", "Opus"][Int(idx) % 4]
+                    label: dict["labelIndex"].flatMap { idx in
+                        let labels = ["Session", "Weekly", "Sonnet", "Opus"]
+                        let i = Int(idx) % labels.count
+                        return i >= 0 ? labels[i] : nil
                     } ?? "Quota",
                     utilization: util,
                     color: color

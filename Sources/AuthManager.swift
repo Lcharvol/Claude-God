@@ -87,9 +87,8 @@ class AuthManager: ObservableObject {
 
     var tokenNeedsRefresh: Bool {
         guard let expiresAt = tokenExpiresAt else { return true }
-        let nowMs = Date().timeIntervalSince1970 * 1000
-        let bufferMs: Double = 5 * 60 * 1000
-        return nowMs + bufferMs >= expiresAt
+        let expiresDate = Date(timeIntervalSince1970: expiresAt / 1000)
+        return Date().addingTimeInterval(5 * 60) >= expiresDate
     }
 
     func refreshAccessToken(completion: @escaping (Bool) -> Void) {
@@ -224,11 +223,12 @@ class AuthManager: ObservableObject {
             process.waitUntilExit()
             guard process.terminationStatus == 0 else { return nil }
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let jsonString = String(data: data, encoding: .utf8)?
+            let rawData = pipe.fileHandleForReading.readDataToEndOfFile()
+            // Trim whitespace from raw output before parsing
+            guard let trimmed = String(data: rawData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
-                  !jsonString.isEmpty,
-                  let jsonData = jsonString.data(using: .utf8),
+                  !trimmed.isEmpty,
+                  let jsonData = trimmed.data(using: .utf8),
                   let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
             else { return nil }
 

@@ -26,7 +26,7 @@ class UpdateChecker: ObservableObject {
                   let tagName = json["tag_name"] as? String,
                   let assets = json["assets"] as? [[String: Any]] else { return }
 
-            let remoteVersion = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
+            let remoteVersion = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
 
             DispatchQueue.main.async {
                 guard Self.isNewer(remote: remoteVersion, current: Self.currentVersion) else { return }

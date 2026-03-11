@@ -194,6 +194,20 @@ struct UsageStats {
     var daily: [DailyUsage] = []
     var byProject: [ProjectUsage] = []
 
+    /// Models aggregated by short name (Opus, Sonnet, Haiku)
+    var aggregatedModels: [ModelUsage] {
+        var groups: [String: (tokens: TokenUsage, cost: Double, model: String)] = [:]
+        for m in byModel {
+            let key = m.shortName
+            var existing = groups[key] ?? (tokens: TokenUsage(), cost: 0, model: m.model)
+            existing.tokens.add(m.tokens)
+            existing.cost += m.cost
+            groups[key] = existing
+        }
+        return groups.map { ModelUsage(model: $0.value.model, tokens: $0.value.tokens, cost: $0.value.cost) }
+            .sorted { $0.cost > $1.cost }
+    }
+
     /// Derive a sub-period from the full analysis (avoids re-scanning files)
     func filtered(since: Date) -> UsageStats {
         let sinceDay = Calendar.current.startOfDay(for: since)
@@ -215,8 +229,8 @@ struct UsageStats {
         let today = cal.startOfDay(for: Date())
         let dailyMap = Dictionary(uniqueKeysWithValues: daily.map { (cal.startOfDay(for: $0.date), $0) })
 
-        return (0..<days).reversed().map { offset in
-            let date = cal.date(byAdding: .day, value: -offset, to: today)!
+        return (0..<days).reversed().compactMap { offset in
+            guard let date = cal.date(byAdding: .day, value: -offset, to: today) else { return nil }
             if let day = dailyMap[date] {
                 return HeatmapDay(date: date, cost: day.cost, messageCount: day.messageCount)
             }
@@ -228,21 +242,25 @@ struct UsageStats {
     var weekComparison: WeekComparison {
         let cal = Calendar.current
         let now = Date()
-        let thisWeekStart = cal.startOfDay(for: cal.date(byAdding: .day, value: -7, to: now)!)
-        let lastWeekStart = cal.startOfDay(for: cal.date(byAdding: .day, value: -14, to: now)!)
+        guard let thisWeekStart = cal.date(byAdding: .day, value: -7, to: now),
+              let lastWeekStart = cal.date(byAdding: .day, value: -14, to: now)
+        else { return WeekComparison() }
 
-        var comp = WeekComparison()
-        for day in daily {
-            let dayStart = cal.startOfDay(for: day.date)
-            if dayStart >= thisWeekStart {
-                comp.thisWeekCost += day.cost
-                comp.thisWeekMessages += day.messageCount
-            } else if dayStart >= lastWeekStart {
-                comp.lastWeekCost += day.cost
-                comp.lastWeekMessages += day.messageCount
-            }
+        let thisStart = cal.startOfDay(for: thisWeekStart)
+        let lastStart = cal.startOfDay(for: lastWeekStart)
+
+        let thisWeek = daily.filter { cal.startOfDay(for: $0.date) >= thisStart }
+        let lastWeek = daily.filter {
+            let d = cal.startOfDay(for: $0.date)
+            return d >= lastStart && d < thisStart
         }
-        return comp
+
+        return WeekComparison(
+            thisWeekCost: thisWeek.map(\.cost).reduce(0, +),
+            lastWeekCost: lastWeek.map(\.cost).reduce(0, +),
+            thisWeekMessages: thisWeek.map(\.messageCount).reduce(0, +),
+            lastWeekMessages: lastWeek.map(\.messageCount).reduce(0, +)
+        )
     }
 
     /// Efficiency metrics
@@ -325,8 +343,24 @@ class SessionAnalyzer {
             .appendingPathComponent(".claude/projects")
     }()
 
+    /// Max JSONL file size to load into memory (300 MB)
+    private static let maxFileSize: UInt64 = 300 * 1024 * 1024
+
     static func parseISO(_ string: String) -> Date? {
         isoFormatter.date(from: string) ?? isoFormatterNoFrac.date(from: string)
+    }
+
+    /// Extract user message text from a JSONL line's message dict
+    static func extractUserText(from message: [String: Any]) -> String {
+        if let contentStr = message["content"] as? String {
+            return contentStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let contentArr = message["content"] as? [[String: Any]],
+           let first = contentArr.first(where: { $0["type"] as? String == "text" }),
+           let text = first["text"] as? String {
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return ""
     }
 
     /// Extract a short project name from the encoded directory name
@@ -374,9 +408,14 @@ class SessionAnalyzer {
 
             for file in files where file.pathExtension == "jsonl" {
                 // Skip files older than our window (quick check via modification date)
-                if let attrs = try? fm.attributesOfItem(atPath: file.path),
-                   let modDate = attrs[.modificationDate] as? Date,
-                   modDate < since {
+                guard let attrs = try? fm.attributesOfItem(atPath: file.path),
+                      let modDate = attrs[.modificationDate] as? Date,
+                      modDate >= since
+                else { continue }
+
+                // Skip files that are too large
+                if let fileSize = attrs[.size] as? UInt64, fileSize > maxFileSize {
+                    print("[ClaudeGod] Skipping oversized JSONL (\(fileSize / 1_048_576)MB): \(file.lastPathComponent)")
                     continue
                 }
 
@@ -402,8 +441,7 @@ class SessionAnalyzer {
                     else { return }
 
                     guard let timestampStr = entry.timestamp,
-                          let timestamp = isoFormatter.date(from: timestampStr)
-                              ?? isoFormatterNoFrac.date(from: timestampStr)
+                          let timestamp = parseISO(timestampStr)
                     else { return }
 
                     guard timestamp >= since, timestamp <= until else { return }
@@ -536,17 +574,8 @@ class SessionAnalyzer {
                 if let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                    let type = json["type"] as? String, type == "human",
                    let message = json["message"] as? [String: Any] {
-                    var text = ""
-                    if let contentStr = message["content"] as? String {
-                        text = contentStr
-                    } else if let contentArr = message["content"] as? [[String: Any]],
-                              let first = contentArr.first(where: { $0["type"] as? String == "text" }),
-                              let t = first["text"] as? String {
-                        text = t
-                    }
-                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    // Prefer longer messages as topic (skip short "test", "ok", etc.)
-                    if topic.isEmpty || (trimmed.count > topic.count && topic.count < 20) {
+                    let trimmed = extractUserText(from: message)
+                    if !trimmed.isEmpty && (topic.isEmpty || (trimmed.count > topic.count && topic.count < 20)) {
                         topic = String(trimmed.prefix(100))
                     }
                 }
@@ -621,7 +650,7 @@ class SessionAnalyzer {
                 if let attrs = try? fm.attributesOfItem(atPath: file.path),
                    let modDate = attrs[.modificationDate] as? Date,
                    Date().timeIntervalSince(modDate) < threshold {
-                    if newest == nil || modDate > newest!.modDate {
+                    if newest.map({ modDate > $0.modDate }) ?? true {
                         newest = (file, modDate)
                     }
                 }
@@ -656,6 +685,187 @@ class SessionAnalyzer {
         }
 
         return messageCount > 0 ? (cost, messageCount, activeFile.url) : nil
+    }
+}
+
+// MARK: - Timeline data models
+
+struct TimelineMessage: Identifiable {
+    let id = UUID()
+    let timestamp: Date
+    let model: String
+    let inputTokens: Int
+    let outputTokens: Int
+    let cost: Double
+    let topic: String // extracted from preceding user message
+
+    var shortModel: String { ModelPricing.shortName(for: model) }
+
+    var timeLabel: String {
+        SessionAnalyzer.timeLabelFormatter.string(from: timestamp)
+    }
+}
+
+struct TimelineSession: Identifiable {
+    let id: String
+    let projectName: String
+    let topic: String
+    let startTime: Date
+    let endTime: Date
+    let cost: Double
+    let messageCount: Int
+    let primaryModel: String
+    let messages: [TimelineMessage]
+    let projectColor: Int // hash-based color index
+
+    var duration: TimeInterval { endTime.timeIntervalSince(startTime) }
+
+    var durationLabel: String {
+        let minutes = Int(duration) / 60
+        if minutes < 1 { return "<1m" }
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        let mins = minutes % 60
+        return "\(hours)h \(mins)m"
+    }
+
+    var timeRangeLabel: String {
+        let fmt = SessionAnalyzer.timeLabelFormatter
+        return "\(fmt.string(from: startTime)) → \(fmt.string(from: endTime))"
+    }
+}
+
+// MARK: - Timeline parsing
+
+extension SessionAnalyzer {
+
+    /// Parse sessions for a specific day with per-message detail
+    static func timelineSessions(for date: Date) -> [TimelineSession] {
+        let fm = FileManager.default
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: date)
+        guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
+
+        guard let projectDirs = try? fm.contentsOfDirectory(
+            at: projectsDir, includingPropertiesForKeys: nil
+        ) else { return [] }
+
+        var sessions: [TimelineSession] = []
+
+        for projectDir in projectDirs {
+            let dirName = projectDir.lastPathComponent
+            let projName = projectName(from: dirName)
+
+            guard let files = try? fm.contentsOfDirectory(
+                at: projectDir, includingPropertiesForKeys: [.contentModificationDateKey]
+            ) else { continue }
+
+            for file in files where file.pathExtension == "jsonl" {
+                // Quick filter: skip files not modified recently enough
+                if let attrs = try? fm.attributesOfItem(atPath: file.path),
+                   let modDate = attrs[.modificationDate] as? Date,
+                   modDate < (cal.date(byAdding: .day, value: -30, to: dayStart) ?? dayStart) {
+                    continue
+                }
+
+                guard let data = try? Data(contentsOf: file),
+                      let content = String(data: data, encoding: .utf8)
+                else { continue }
+
+                var messages: [TimelineMessage] = []
+                var lastUserText = ""
+                var sessionTopic = ""
+                var modelCounts: [String: Int] = [:]
+                var sessionHasMatchingDay = false
+
+                content.enumerateLines { line, _ in
+                    guard !line.isEmpty,
+                          let lineData = line.data(using: .utf8)
+                    else { return }
+
+                    // Extract user messages for topic context
+                    if let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                       let type = json["type"] as? String,
+                       type == "human" || type == "user",
+                       let message = json["message"] as? [String: Any] {
+                        let trimmed = extractUserText(from: message)
+                        if !trimmed.isEmpty {
+                            lastUserText = String(trimmed.prefix(120))
+                            if sessionTopic.isEmpty || (trimmed.count > sessionTopic.count && sessionTopic.count < 20) {
+                                sessionTopic = String(trimmed.prefix(100))
+                            }
+                        }
+                    }
+
+                    // Parse assistant messages
+                    guard let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData),
+                          entry.type == "assistant",
+                          let message = entry.message,
+                          let usage = message.usage,
+                          let model = message.model, model != "<synthetic>",
+                          let tsStr = entry.timestamp,
+                          let timestamp = parseISO(tsStr),
+                          // Only include messages with end_turn (final response, not streaming chunks)
+                          (usage.outputTokens ?? 0) > 0
+                    else { return }
+
+                    // Check if this message falls within the target day
+                    guard timestamp >= dayStart, timestamp < dayEnd else { return }
+                    sessionHasMatchingDay = true
+
+                    let input = usage.inputTokens ?? 0
+                    let output = usage.outputTokens ?? 0
+                    let cacheCr = usage.cacheCreationInputTokens ?? 0
+                    let cacheRd = usage.cacheReadInputTokens ?? 0
+
+                    let price = ModelPricing.price(for: model)
+                    let cost = Double(input) * price.input
+                        + Double(output) * price.output
+                        + Double(cacheCr) * price.cacheCreation
+                        + Double(cacheRd) * price.cacheRead
+
+                    modelCounts[model, default: 0] += 1
+
+                    messages.append(TimelineMessage(
+                        timestamp: timestamp,
+                        model: model,
+                        inputTokens: input + cacheCr + cacheRd,
+                        outputTokens: output,
+                        cost: cost,
+                        topic: lastUserText
+                    ))
+                }
+
+                guard sessionHasMatchingDay, !messages.isEmpty else { continue }
+
+                let sortedMsgs = messages.sorted { $0.timestamp < $1.timestamp }
+                let totalCost = sortedMsgs.reduce(0) { $0 + $1.cost }
+                let primaryModel = modelCounts.max(by: { $0.value < $1.value })?.key ?? ""
+                let cleanTopic = sessionTopic
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "\n", with: " ")
+
+                // Deterministic color from project name hash
+                let colorIndex = abs(projName.hashValue) % 8
+
+                let stableID = file.deletingPathExtension().lastPathComponent
+
+                sessions.append(TimelineSession(
+                    id: stableID,
+                    projectName: projName,
+                    topic: cleanTopic.isEmpty ? "Untitled session" : cleanTopic,
+                    startTime: sortedMsgs.first?.timestamp ?? Date(),
+                    endTime: sortedMsgs.last?.timestamp ?? Date(),
+                    cost: totalCost,
+                    messageCount: sortedMsgs.count,
+                    primaryModel: ModelPricing.shortName(for: primaryModel),
+                    messages: sortedMsgs,
+                    projectColor: colorIndex
+                ))
+            }
+        }
+
+        return sessions.sorted { $0.startTime > $1.startTime }
     }
 }
 

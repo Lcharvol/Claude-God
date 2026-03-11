@@ -53,8 +53,10 @@ struct MenuBarView: View {
                 Group {
                     if !manager.isAuthenticated || manager.showSettings {
                         settingsView
-                    } else if manager.showStats {
+                    } else if manager.selectedTab == .analytics {
                         statsView
+                    } else if manager.selectedTab == .timeline {
+                        timelineView
                     } else if manager.isLoading && manager.lastRefresh == nil {
                         loadingView
                     } else if let error = manager.errorMessage {
@@ -81,8 +83,8 @@ struct MenuBarView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
         }
-        .frame(width: manager.compactMode && !manager.showSettings && !manager.showStats ? 280 : 340)
-        .animation(.easeOut(duration: 0.15), value: manager.showStats)
+        .frame(width: manager.compactMode && !manager.showSettings && manager.selectedTab == .usage ? 280 : 340)
+        .animation(.easeOut(duration: 0.15), value: manager.selectedTab)
         .animation(.easeOut(duration: 0.15), value: manager.showSettings)
     }
 
@@ -125,7 +127,7 @@ struct MenuBarView: View {
 
             Spacer()
 
-            if let lastRefresh = manager.lastRefresh, !manager.showSettings && !manager.showStats {
+            if let lastRefresh = manager.lastRefresh, !manager.showSettings && manager.selectedTab == .usage {
                 Text(lastRefresh.formatted(date: .omitted, time: .shortened))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(.secondary)
@@ -139,7 +141,7 @@ struct MenuBarView: View {
 
             SHIconButton(icon: manager.showSettings ? "xmark" : "gearshape") {
                 manager.showSettings.toggle()
-                if manager.showSettings { manager.showStats = false }
+                if manager.showSettings { manager.selectedTab = .usage }
             }
         }
     }
@@ -148,14 +150,21 @@ struct MenuBarView: View {
 
     private var tabBar: some View {
         HStack(spacing: 1) {
-            SHTab(label: "Usage", isActive: !manager.showStats) {
-                manager.showStats = false
+            SHTab(label: "Usage", isActive: manager.selectedTab == .usage) {
+                manager.selectedTab = .usage
             }
             .keyboardShortcut("1", modifiers: .command)
-            SHTab(label: "Analytics", isActive: manager.showStats) {
-                manager.showStats = true
+            SHTab(label: "Analytics", isActive: manager.selectedTab == .analytics) {
+                manager.selectedTab = .analytics
             }
             .keyboardShortcut("2", modifiers: .command)
+            SHTab(label: "Timeline", isActive: manager.selectedTab == .timeline) {
+                manager.selectedTab = .timeline
+                if manager.timelineSessions.isEmpty {
+                    manager.refreshTimeline()
+                }
+            }
+            .keyboardShortcut("3", modifiers: .command)
         }
         .padding(2)
         .background(
@@ -455,7 +464,7 @@ struct MenuBarView: View {
                         }
                     }
                     HStack(spacing: 8) {
-                        Text("⌥⌘C Toggle · ⌘R Refresh · ⌘1 Usage · ⌘2 Analytics")
+                        Text("⌥⌘C Toggle · ⌘R Refresh · ⌘1 Usage · ⌘2 Analytics · ⌘3 Timeline")
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundColor(.secondary.opacity(0.6))
                     }
@@ -1139,20 +1148,242 @@ struct MenuBarView: View {
 
     /// Aggregate models by short name (merges e.g. claude-3-opus + claude-opus-4)
     private var aggregatedModels: [ModelUsage] {
-        var groups: [String: (tokens: TokenUsage, cost: Double, model: String)] = [:]
-        for m in manager.monthStats.byModel {
-            let key = m.shortName
-            var existing = groups[key] ?? (tokens: TokenUsage(), cost: 0, model: m.model)
-            existing.tokens.add(m.tokens)
-            existing.cost += m.cost
-            groups[key] = existing
-        }
-        return groups.map { ModelUsage(model: $0.value.model, tokens: $0.value.tokens, cost: $0.value.cost) }
-            .sorted { $0.cost > $1.cost }
+        manager.monthStats.aggregatedModels
     }
 
     private var maxDailyCost: Double {
         manager.monthStats.daily.prefix(dailyRange).map(\.cost).max() ?? 1
+    }
+
+    // MARK: - Timeline
+
+    private static let timelineDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE d MMM yyyy"
+        return f
+    }()
+
+    private static let projectColors: [Color] = [
+        .purple, .blue, .green, .orange, .pink, .cyan, .yellow, .red
+    ]
+
+    private var timelineView: some View {
+        VStack(spacing: 10) {
+            // Day navigation
+            HStack {
+                Button(action: { manager.timelineGoToPreviousDay() }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(Color.secondary)
+
+                Spacer()
+
+                Text(Self.timelineDateFormatter.string(from: manager.timelineDate))
+                    .font(.system(size: 12, weight: .semibold))
+
+                Spacer()
+
+                Button(action: { manager.timelineGoToNextDay() }) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(Calendar.current.isDateInToday(manager.timelineDate) ? Theme.muted : Color.secondary)
+                .disabled(Calendar.current.isDateInToday(manager.timelineDate))
+            }
+            .padding(.horizontal, 4)
+
+            // Day summary
+            if !manager.timelineSessions.isEmpty {
+                let totalCost = manager.timelineSessions.reduce(0) { $0 + $1.cost }
+                let totalMsgs = manager.timelineSessions.reduce(0) { $0 + $1.messageCount }
+                HStack(spacing: 12) {
+                    timelineStat(label: "Sessions", value: "\(manager.timelineSessions.count)")
+                    timelineStat(label: "Messages", value: "\(totalMsgs)")
+                    timelineStat(label: "Cost", value: "$\(String(format: "%.2f", totalCost))")
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Theme.muted)
+                )
+            }
+
+            if manager.isLoadingTimeline {
+                VStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading sessions...")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.top, 20)
+            } else if manager.timelineSessions.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundColor(.secondary.opacity(0.5))
+                    Text("No sessions this day")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.top, 20)
+            } else {
+                // Session list
+                ForEach(manager.timelineSessions) { session in
+                    timelineSessionCard(session)
+                }
+            }
+        }
+    }
+
+    private func timelineStat(label: String, value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @State private var expandedTimelineSessions: Set<String> = []
+
+    private func timelineSessionCard(_ session: TimelineSession) -> some View {
+        let isExpanded = expandedTimelineSessions.contains(session.id)
+        let projColor = Self.projectColors[session.projectColor % Self.projectColors.count]
+
+        return VStack(spacing: 0) {
+            // Session header (always visible)
+            Button(action: {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    if isExpanded {
+                        expandedTimelineSessions.remove(session.id)
+                    } else {
+                        expandedTimelineSessions.insert(session.id)
+                    }
+                }
+            }) {
+                VStack(alignment: .leading, spacing: 6) {
+                    // Time range + project badge
+                    HStack(spacing: 6) {
+                        // Color bar
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(projColor)
+                            .frame(width: 3, height: 32)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 4) {
+                                Text(session.timeRangeLabel)
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                Text("·")
+                                    .foregroundColor(.secondary)
+                                Text(session.durationLabel)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Text(session.projectName)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(projColor)
+                        }
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("$\(String(format: "%.3f", session.cost))")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            HStack(spacing: 3) {
+                                Text("\(session.messageCount) msgs")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                Text("·")
+                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 9))
+                                Text(session.primaryModel)
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+
+                    // Topic
+                    Text(session.topic)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .lineLimit(isExpanded ? 3 : 1)
+                }
+                .padding(10)
+            }
+            .buttonStyle(.plain)
+
+            // Expanded: message list
+            if isExpanded {
+                SHDivider()
+                VStack(spacing: 0) {
+                    ForEach(Array(session.messages.enumerated()), id: \.element.id) { index, msg in
+                        HStack(spacing: 8) {
+                            Text(msg.timeLabel)
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .frame(width: 36, alignment: .leading)
+
+                            // Model badge
+                            Text(msg.shortModel)
+                                .font(.system(size: 8, weight: .bold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .fill(modelColor(msg.shortModel).opacity(0.15))
+                                )
+                                .foregroundColor(modelColor(msg.shortModel))
+
+                            Text(msg.topic)
+                                .font(.system(size: 9))
+                                .foregroundColor(Color.secondary)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Text("$\(String(format: "%.4f", msg.cost))")
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+
+                        if index < session.messages.count - 1 {
+                            Divider().padding(.leading, 54)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Theme.muted)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+    }
+
+    private func modelColor(_ shortModel: String) -> Color {
+        switch shortModel {
+        case "Opus": return .purple
+        case "Sonnet": return .blue
+        case "Haiku": return .green
+        default: return .secondary
+        }
     }
 
     // MARK: - States

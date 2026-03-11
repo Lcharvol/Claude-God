@@ -216,7 +216,8 @@ class UsageManager: ObservableObject {
     @Published var todayStats = UsageStats()
     @Published var weekStats = UsageStats()
     @Published var monthStats = UsageStats()
-    @Published var showStats = false
+    enum Tab: Int { case usage, analytics, timeline }
+    @Published var selectedTab: Tab = .usage
     @Published var isLoadingStats = false
     @Published var sessionHistory: [SessionInfo] = []
 
@@ -268,6 +269,12 @@ class UsageManager: ObservableObject {
             UserDefaults.standard.set(activeAccountIndex, forKey: "activeAccountIndex")
         }
     }
+
+    // MARK: - Timeline
+
+    @Published var timelineSessions: [TimelineSession] = []
+    @Published var timelineDate: Date = Date()
+    @Published var isLoadingTimeline = false
 
     // MARK: - État de l'interface
 
@@ -441,10 +448,23 @@ class UsageManager: ObservableObject {
 
     // MARK: - Private
 
+    // MARK: - Constants
+
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     private static let maxRetries = 5
-    private var rateLimitedUntil: Date?
+    private static let retryBaseDelay: Double = 5
+    private static let rateLimitRetryBaseDelay: Double = 5
+    private static let activeSessionCheckInterval: TimeInterval = 15
+    private static let activeSessionThreshold: TimeInterval = 60
+    private static let hysteresisStandard: Double = 5
+    private static let hysteresisCustom: Double = 10
+    private static let emergencyThreshold: Double = 95
+    private static let resetDetectionHigh: Double = 50
+    private static let resetDetectionLow: Double = 10
+    private static let recentSessionsLimit = 15
+    private static let statsWindowDays = 30
 
+    private var rateLimitedUntil: Date?
     private var countdownTimer: AnyCancellable?
     private var autoRefreshTimer: AnyCancellable?
     private var activeSessionTimer: AnyCancellable?
@@ -559,14 +579,14 @@ class UsageManager: ObservableObject {
             let cal = Calendar.current
             let now = Date()
             let todayStart = cal.startOfDay(for: now)
-            let weekStart = cal.date(byAdding: .day, value: -7, to: now)!
-            let monthStart = cal.date(byAdding: .day, value: -30, to: now)!
+            let weekStart = cal.date(byAdding: .day, value: -7, to: now) ?? now
+            let monthStart = cal.date(byAdding: .day, value: -Self.statsWindowDays, to: now) ?? now
 
             let month = SessionAnalyzer.analyze(since: monthStart)
             let week = month.filtered(since: weekStart)
             let today = month.filtered(since: todayStart)
 
-            let sessions = SessionAnalyzer.recentSessions(limit: 15)
+            let sessions = SessionAnalyzer.recentSessions(limit: Self.recentSessionsLimit)
 
             DispatchQueue.main.async {
                 self?.todayStats = today
@@ -581,11 +601,36 @@ class UsageManager: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
     }
 
+    // MARK: - Timeline
+
+    func refreshTimeline() {
+        isLoadingTimeline = true
+        let date = timelineDate
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let sessions = SessionAnalyzer.timelineSessions(for: date)
+            DispatchQueue.main.async {
+                self?.timelineSessions = sessions
+                self?.isLoadingTimeline = false
+            }
+        }
+    }
+
+    func timelineGoToPreviousDay() {
+        timelineDate = Calendar.current.date(byAdding: .day, value: -1, to: timelineDate) ?? timelineDate
+        refreshTimeline()
+    }
+
+    func timelineGoToNextDay() {
+        guard let next = Calendar.current.date(byAdding: .day, value: 1, to: timelineDate),
+              next <= Date() else { return }
+        timelineDate = next
+        refreshTimeline()
+    }
+
     // MARK: - Active session detection
 
     private func setupActiveSessionDetection() {
-        // Check every 15s for active session (was 10s). Only computes live cost when active.
-        activeSessionTimer = Timer.publish(every: 15, on: .main, in: .common)
+        activeSessionTimer = Timer.publish(every: Self.activeSessionCheckInterval, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 self?.checkActiveSession()
@@ -731,9 +776,9 @@ class UsageManager: ObservableObject {
                         print("[ClaudeGod] Response: \(raw.prefix(500))")
                     }
                     // Store previous utilizations for reset detection
-                    for q in self.quotas {
-                        self.previousQuotaUtilizations[q.label] = q.utilization
-                    }
+                    self.previousQuotaUtilizations = Dictionary(
+                        uniqueKeysWithValues: self.quotas.map { ($0.label, $0.utilization) }
+                    )
                     self.parseUsageResponse(data)
                     self.isLoading = false
                     self.lastRefresh = Date()
@@ -817,55 +862,36 @@ class UsageManager: ObservableObject {
     // MARK: - Response parsing (Codable)
 
     private func parseUsageResponse(_ data: Data) {
-        guard let response = try? JSONDecoder().decode(OAuthUsageResponse.self, from: data) else {
+        do {
+            let response = try JSONDecoder().decode(OAuthUsageResponse.self, from: data)
+            applyUsageResponse(response)
+        } catch {
+            print("[ClaudeGod] Failed to parse usage response: \(error)")
+            if let raw = String(data: data, encoding: .utf8) {
+                print("[ClaudeGod] Raw response: \(raw.prefix(300))")
+            }
             errorMessage = "Failed to parse response"
-            return
         }
+    }
 
-        var newQuotas: [UsageQuota] = []
+    private func applyUsageResponse(_ response: OAuthUsageResponse) {
+        let quotaDefs: [(quota: QuotaData?, label: String, icon: String)] = [
+            (response.fiveHour, "Session (5h)", "bolt.fill"),
+            (response.sevenDay, "Weekly (all models)", "calendar"),
+            (response.sevenDaySonnet, "Sonnet (7d)", "sparkle"),
+            (response.sevenDayOpus, "Opus (7d)", "star.fill"),
+        ]
 
-        if let fiveHour = response.fiveHour {
-            let resetsAt = fiveHour.resetsAt.flatMap(Formatters.parseISO)
-            newQuotas.append(UsageQuota(
-                label: "Session (5h)",
-                icon: "bolt.fill",
-                utilization: fiveHour.utilization,
-                resetsAt: resetsAt
-            ))
+        quotas = quotaDefs.compactMap { def in
+            guard let q = def.quota else { return nil }
+            return UsageQuota(
+                label: def.label,
+                icon: def.icon,
+                utilization: q.utilization,
+                resetsAt: q.resetsAt.flatMap(Formatters.parseISO)
+            )
         }
-
-        if let sevenDay = response.sevenDay {
-            let resetsAt = sevenDay.resetsAt.flatMap(Formatters.parseISO)
-            newQuotas.append(UsageQuota(
-                label: "Weekly (all models)",
-                icon: "calendar",
-                utilization: sevenDay.utilization,
-                resetsAt: resetsAt
-            ))
-        }
-
-        if let sonnet = response.sevenDaySonnet {
-            let resetsAt = sonnet.resetsAt.flatMap(Formatters.parseISO)
-            newQuotas.append(UsageQuota(
-                label: "Sonnet (7d)",
-                icon: "sparkle",
-                utilization: sonnet.utilization,
-                resetsAt: resetsAt
-            ))
-        }
-
-        if let opus = response.sevenDayOpus {
-            let resetsAt = opus.resetsAt.flatMap(Formatters.parseISO)
-            newQuotas.append(UsageQuota(
-                label: "Opus (7d)",
-                icon: "star.fill",
-                utilization: opus.utilization,
-                resetsAt: resetsAt
-            ))
-        }
-
-        quotas = newQuotas
-        print("[ClaudeGod] Parsed \(newQuotas.count) quotas")
+        print("[ClaudeGod] Parsed \(quotas.count) quotas")
     }
 
     // MARK: - Countdown
@@ -945,39 +971,32 @@ class UsageManager: ObservableObject {
         guard notificationsEnabled else { return }
 
         let customThreshold = 100 - notificationThreshold
-        let thresholds = Array(Set([customThreshold, 95])).sorted()
+        let thresholds = Array(Set([customThreshold, Self.emergencyThreshold])).sorted()
 
-        var updated = notifiedThresholds
-
-        for quota in quotas {
-            for threshold in thresholds {
-                let key = "\(quota.label)-\(Int(threshold))"
-
-                if quota.utilization >= threshold && !updated.contains(key) {
-                    let content = UNMutableNotificationContent()
-                    content.title = "Claude God"
-                    if threshold >= 95 {
-                        content.body = "\(quota.label): \(Int(quota.utilization))% used — almost at limit!"
-                    } else {
-                        content.body = "\(quota.label): \(Int(quota.utilization))% used"
-                    }
-                    content.sound = .default
-
-                    let request = UNNotificationRequest(
-                        identifier: "usage-\(UUID().uuidString)",
-                        content: content,
-                        trigger: nil
-                    )
-                    UNUserNotificationCenter.current().add(request)
-                    updated.insert(key)
-                } else if quota.utilization < threshold - 5 {
-                    // Hysteresis: must drop 5% below to re-arm
-                    updated.remove(key)
-                }
-            }
+        // Build pairs of (quota, threshold) that need action
+        let pairs = quotas.flatMap { quota in
+            thresholds.map { threshold in (quota: quota, threshold: threshold, key: "\(quota.label)-\(Int(threshold))") }
         }
 
-        notifiedThresholds = updated
+        let toNotify = pairs.filter { $0.quota.utilization >= $0.threshold && !notifiedThresholds.contains($0.key) }
+        let toRearm = pairs.filter { $0.quota.utilization < $0.threshold - Self.hysteresisStandard && notifiedThresholds.contains($0.key) }
+
+        // Send notifications
+        toNotify.forEach { pair in
+            let content = UNMutableNotificationContent()
+            content.title = "Claude God"
+            content.body = pair.threshold >= Self.emergencyThreshold
+                ? "\(pair.quota.label): \(Int(pair.quota.utilization))% used — almost at limit!"
+                : "\(pair.quota.label): \(Int(pair.quota.utilization))% used"
+            content.sound = .default
+            let request = UNNotificationRequest(identifier: "usage-\(UUID().uuidString)", content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request)
+        }
+
+        // Update thresholds atomically
+        notifiedThresholds = notifiedThresholds
+            .union(Set(toNotify.map(\.key)))
+            .subtracting(Set(toRearm.map(\.key)))
     }
 
     // MARK: - Reset notifications
@@ -985,23 +1004,19 @@ class UsageManager: ObservableObject {
     private func checkResetNotifications() {
         guard notificationsEnabled else { return }
 
-        for quota in quotas {
-            if let previousUtil = previousQuotaUtilizations[quota.label],
-               previousUtil > 50 && quota.utilization < 10 {
-                // Quota just reset
-                let content = UNMutableNotificationContent()
-                content.title = "Claude God"
-                content.body = "\(quota.label) quota reset — you're back to \(Int(quota.utilization))%"
-                content.sound = .default
+        let resetQuotas = quotas.filter { quota in
+            guard let previousUtil = previousQuotaUtilizations[quota.label] else { return false }
+            return previousUtil > Self.resetDetectionHigh && quota.utilization < Self.resetDetectionLow
+        }
 
-                let request = UNNotificationRequest(
-                    identifier: "reset-\(UUID().uuidString)",
-                    content: content,
-                    trigger: nil
-                )
-                UNUserNotificationCenter.current().add(request)
-                print("[ClaudeGod] Reset notification sent for \(quota.label)")
-            }
+        resetQuotas.forEach { quota in
+            let content = UNMutableNotificationContent()
+            content.title = "Claude God"
+            content.body = "\(quota.label) quota reset — you're back to \(Int(quota.utilization))%"
+            content.sound = .default
+            let request = UNNotificationRequest(identifier: "reset-\(UUID().uuidString)", content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request)
+            print("[ClaudeGod] Reset notification sent for \(quota.label)")
         }
     }
 
@@ -1009,10 +1024,13 @@ class UsageManager: ObservableObject {
 
     private func checkCustomAlerts() {
         guard notificationsEnabled else { return }
+        // Collect index changes to apply after iteration (avoid mutating @Published during loop)
+        var toNotify: [Int] = []
+        var toRearm: [Int] = []
         for i in customAlertRules.indices {
             let rule = customAlertRules[i]
-            if let quota = quotas.first(where: { $0.label == rule.quotaLabel }),
-               quota.utilization >= rule.threshold && !rule.notified {
+            guard let quota = quotas.first(where: { $0.label == rule.quotaLabel }) else { continue }
+            if quota.utilization >= rule.threshold && !rule.notified {
                 let content = UNMutableNotificationContent()
                 content.title = "Claude God"
                 content.body = "\(rule.quotaLabel): \(Int(quota.utilization))% used (alert at \(Int(rule.threshold))%)"
@@ -1022,13 +1040,14 @@ class UsageManager: ObservableObject {
                     content: content, trigger: nil
                 )
                 UNUserNotificationCenter.current().add(request)
-                customAlertRules[i].notified = true
-            } else if let quota = quotas.first(where: { $0.label == rule.quotaLabel }),
-                      quota.utilization < rule.threshold - 10 && rule.notified {
-                // Hysteresis: must drop 10% below threshold to re-arm
-                customAlertRules[i].notified = false
+                toNotify.append(i)
+            } else if quota.utilization < rule.threshold - Self.hysteresisCustom && rule.notified {
+                toRearm.append(i)
             }
         }
+        // Apply mutations once
+        for i in toNotify { customAlertRules[i].notified = true }
+        for i in toRearm { customAlertRules[i].notified = false }
     }
 
     // MARK: - Per-project budget check
@@ -1125,51 +1144,43 @@ class UsageManager: ObservableObject {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            // Silently ignore
+            print("[ClaudeGod] Failed to update launch at login: \(error.localizedDescription)")
         }
     }
 
     // MARK: - Copy & Export
 
     func copyStatsToClipboard() -> Bool {
-        var lines: [String] = ["Claude God — Usage Stats"]
-        lines.append("")
-
-        if !quotas.isEmpty {
-            lines.append("── Quotas ──")
-            for q in quotas {
-                lines.append("\(q.label): \(Int(q.utilization))% used")
-            }
-            lines.append("")
-        }
-
         let fmt: (Double) -> String = { cost in
             cost >= 0.01 ? String(format: "$%.2f", cost) : String(format: "$%.3f", cost)
         }
 
-        lines.append("── Cost (JSONL) ──")
-        lines.append("Today: \(fmt(todayStats.totalCost)) (\(todayStats.totalMessages) msgs)")
-        lines.append("7 days: \(fmt(weekStats.totalCost)) (\(weekStats.totalMessages) msgs)")
-        lines.append("30 days: \(fmt(monthStats.totalCost)) (\(monthStats.totalMessages) msgs)")
+        let sections: [[String]] = [
+            ["Claude God — Usage Stats", ""],
+            quotas.isEmpty ? [] : (
+                ["── Quotas ──"] +
+                quotas.map { "\($0.label): \(Int($0.utilization))% used" } +
+                [""]
+            ),
+            [
+                "── Cost (JSONL) ──",
+                "Today: \(fmt(todayStats.totalCost)) (\(todayStats.totalMessages) msgs)",
+                "7 days: \(fmt(weekStats.totalCost)) (\(weekStats.totalMessages) msgs)",
+                "30 days: \(fmt(monthStats.totalCost)) (\(monthStats.totalMessages) msgs)",
+            ],
+            monthStats.byModel.isEmpty ? [] : (
+                ["", "── Models (30d) ──"] +
+                monthStats.byModel.map { "\($0.shortName): \(fmt($0.cost))" }
+            ),
+            monthStats.byProject.isEmpty ? [] : (
+                ["", "── Projects (30d) ──"] +
+                monthStats.byProject.map { "\($0.projectName): \(fmt($0.totalCost)) (\($0.totalMessages) msgs)" }
+            ),
+        ]
 
-        if !monthStats.byModel.isEmpty {
-            lines.append("")
-            lines.append("── Models (30d) ──")
-            for m in monthStats.byModel {
-                lines.append("\(m.shortName): \(fmt(m.cost))")
-            }
-        }
-
-        if !monthStats.byProject.isEmpty {
-            lines.append("")
-            lines.append("── Projects (30d) ──")
-            for p in monthStats.byProject {
-                lines.append("\(p.projectName): \(fmt(p.totalCost)) (\(p.totalMessages) msgs)")
-            }
-        }
-
+        let text = sections.flatMap { $0 }.joined(separator: "\n")
         NSPasteboard.general.clearContents()
-        return NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+        return NSPasteboard.general.setString(text, forType: .string)
     }
 
     @Published var csvExportSuccess: Bool?

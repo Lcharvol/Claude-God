@@ -13,21 +13,21 @@ enum ModelPricing {
         let cacheRead: Double
     }
 
-    // Pricing as of 2025 — covers Claude 3.x, 3.5, and 4.x families
-    // Model strings use contains() matching so "opus" matches both claude-3-opus and claude-opus-4
+    // Pricing as of March 2026 — covers Claude 4.x and 3.x families
+    // Uses ≤200K token pricing (standard). Model strings use contains() matching.
     static func price(for model: String) -> Price {
         let m = model.lowercased()
         if m.contains("opus") {
-            return Price(input: 15.0 / 1_000_000, output: 75.0 / 1_000_000,
-                         cacheCreation: 18.75 / 1_000_000, cacheRead: 1.50 / 1_000_000)
+            return Price(input: 5.0 / 1_000_000, output: 25.0 / 1_000_000,
+                         cacheCreation: 6.25 / 1_000_000, cacheRead: 0.50 / 1_000_000)
         }
         if m.contains("sonnet") {
             return Price(input: 3.0 / 1_000_000, output: 15.0 / 1_000_000,
                          cacheCreation: 3.75 / 1_000_000, cacheRead: 0.30 / 1_000_000)
         }
         if m.contains("haiku") {
-            return Price(input: 0.80 / 1_000_000, output: 4.0 / 1_000_000,
-                         cacheCreation: 1.0 / 1_000_000, cacheRead: 0.08 / 1_000_000)
+            return Price(input: 1.0 / 1_000_000, output: 5.0 / 1_000_000,
+                         cacheCreation: 1.25 / 1_000_000, cacheRead: 0.10 / 1_000_000)
         }
         // Default to Sonnet pricing for unknown models
         print("[ClaudeGod] Unknown model '\(model)' — using Sonnet pricing as fallback")

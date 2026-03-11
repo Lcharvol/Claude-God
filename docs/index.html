@@ -3,16 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude God — Monitor Claude AI Usage in Your macOS Menu Bar</title>
-    <meta name="description" content="Free macOS menu bar app to monitor your Claude AI usage quotas, costs, and session analytics with circular gauges, sparkline charts, CSV export. Works with Claude Pro & Max plans. Native SwiftUI, open source.">
-    <meta name="keywords" content="Claude, Claude AI, Claude Code, Anthropic, macOS, menu bar, usage monitor, rate limits, quota tracker, Claude Pro, Claude Max, SwiftUI, open source">
+    <title>Claude God — Track Claude AI Usage, Costs & Rate Limits | Free macOS Menu Bar App</title>
+    <meta name="description" content="Free open-source macOS menu bar app to monitor Claude AI and Claude Code usage in real time. Track rate limits, quotas, API costs, session history, and token usage. Works with Claude Pro, Max & Team plans. Native SwiftUI, Homebrew install.">
+    <meta name="keywords" content="Claude, Claude AI, Claude Code, Anthropic, macOS, menu bar, usage monitor, rate limits, quota tracker, Claude Pro, Claude Max, Claude Team, SwiftUI, open source, API cost tracker, token counter, session analytics, Claude rate limit checker, Claude usage dashboard, Claude spending tracker, AI usage monitor, Claude Code monitor, Homebrew, developer tools">
     <meta name="author" content="Lucas Charvolin">
     <meta name="robots" content="index, follow">
     <meta name="theme-color" content="#9444f0">
+    <meta name="google-site-verification" content="">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Claude God — Monitor Claude AI Usage in Your Menu Bar">
-    <meta property="og:description" content="Free macOS app to track your Claude AI quotas with circular gauges, cost analytics, sparkline charts, and CSV export. Works with Pro & Max — no API credits needed.">
+    <meta property="og:title" content="Claude God — Track Claude AI Usage, Costs & Rate Limits in Your Menu Bar">
+    <meta property="og:description" content="Free macOS menu bar app to monitor Claude AI quotas, costs, rate limits, and session history in real time. Works with Pro, Max & Team — no API key needed. Open source.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://claudegod.app">
     <meta property="og:site_name" content="Claude God">
@@ -20,8 +21,8 @@
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Claude God — Monitor Claude AI Usage in Your Menu Bar">
-    <meta name="twitter:description" content="Free macOS app to track your Claude AI quotas with circular gauges, cost analytics, sparkline charts, and CSV export. Works with Pro & Max — no API credits needed.">
+    <meta name="twitter:title" content="Claude God — Track Claude AI Usage, Costs & Rate Limits in Your Menu Bar">
+    <meta name="twitter:description" content="Free macOS menu bar app to monitor Claude AI quotas, costs, rate limits, and session history in real time. Works with Pro, Max & Team — no API key needed. Open source.">
 
     <link rel="canonical" href="https://claudegod.app">
 
@@ -31,9 +32,11 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "Claude God",
-        "description": "A free macOS menu bar app that monitors your Claude AI usage quotas, session limits, and costs in real time.",
+        "alternateName": ["Claude Usage Monitor", "Claude Rate Limit Tracker", "Claude Cost Tracker"],
+        "description": "A free open-source macOS menu bar app that monitors your Claude AI and Claude Code usage quotas, rate limits, API costs, session history, and token usage in real time. Works with Claude Pro, Max, and Team plans.",
         "url": "https://claudegod.app",
         "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "AI Usage Monitor",
         "operatingSystem": "macOS 13+",
         "offers": {
             "@type": "Offer",
@@ -47,8 +50,63 @@
         },
         "license": "https://opensource.org/licenses/MIT",
         "downloadUrl": "https://github.com/Lcharvol/Claude-God/releases/latest/download/ClaudeGod.dmg",
+        "installUrl": "https://github.com/Lcharvol/Claude-God#installation",
         "softwareVersion": "2.9.0",
-        "programmingLanguage": "Swift"
+        "programmingLanguage": "Swift",
+        "featureList": "Real-time quota gauges, Cost tracking per model, Session timeline, 30-day analytics, Desktop widget, Rate limit notifications, Global hotkey, CSV export, Homebrew install",
+        "screenshot": "https://claudegod.app",
+        "softwareHelp": {
+            "@type": "CreativeWork",
+            "url": "https://github.com/Lcharvol/Claude-God#readme"
+        }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "How do I check my Claude AI rate limits?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Install Claude God, a free macOS menu bar app that shows your Claude AI rate limits in real time with color-coded gauges. It tracks session (5h), weekly, and per-model (Sonnet, Opus) quotas with live countdown timers showing when limits reset."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How much does Claude Code cost per day?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Claude God tracks your Claude Code spending in real time, showing daily, weekly, and monthly costs broken down by model (Opus, Sonnet, Haiku). Install it for free via Homebrew to see exactly how much you spend on Claude Code."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How do I monitor Claude API usage on macOS?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Claude God is a native macOS menu bar app that monitors your Claude usage quotas, costs, and session analytics. Install with: brew tap lcharvol/tap && brew install --cask claude-god. It uses your existing Claude login — no API key needed."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is Claude God free?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes, Claude God is completely free and open source (MIT license). It uses your existing Claude Pro, Max, or Team subscription credentials — no additional API key or billing required."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How do I know when my Claude quota resets?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Claude God shows live countdown timers for each quota (session, weekly, per-model) directly in your macOS menu bar. You can also set up notifications to alert you before hitting rate limits."
+                }
+            }
+        ]
     }
     </script>
 
@@ -1043,8 +1101,8 @@
         </h1>
 
         <p class="hero-sub">
-            A native macOS menu bar app that shows your Claude usage
-            quotas, cost analytics, and trends at a glance. Works with Pro &amp; Max plans — no API credits needed.
+            A native macOS menu bar app that tracks your Claude AI rate limits, usage quotas, costs,
+            and session history in real time. Works with Claude Pro, Max &amp; Team plans — no API key needed.
         </p>
 
         <div class="hero-install">
@@ -1165,23 +1223,23 @@
 <section class="section" id="features">
     <div class="section-inner reveal">
         <p class="section-label">Features</p>
-        <h2 class="section-title">Everything you need,<br>nothing you don't</h2>
-        <p class="section-desc">Circular gauges, cost analytics, sparkline charts, CSV export. All in a lightweight native app.</p>
+        <h2 class="section-title">Track Claude AI usage,<br>costs &amp; rate limits</h2>
+        <p class="section-desc">Real-time quota gauges, cost analytics, session timeline, sparkline charts, and CSV export. All in a lightweight native macOS app.</p>
 
         <div class="features-grid">
             <div class="feat">
                 <div class="feat-icon purple">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                 </div>
-                <h3>Circular gauges</h3>
-                <p>Beautiful animated ring gauges show your quota usage at a glance. Hover for details.</p>
+                <h3>Quota gauges</h3>
+                <p>Animated ring gauges show your Claude rate limits at a glance — session, weekly, Sonnet, and Opus quotas.</p>
             </div>
             <div class="feat">
                 <div class="feat-icon green">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                 </div>
-                <h3>Cost analytics</h3>
-                <p>Track daily costs, model breakdown, and usage trends with sparkline charts. Copy or export as CSV.</p>
+                <h3>Cost tracking</h3>
+                <p>See how much Claude Code costs per day, per model (Opus, Sonnet, Haiku), with 30-day trends and sparkline charts.</p>
             </div>
             <div class="feat">
                 <div class="feat-icon orange">
@@ -1194,8 +1252,8 @@
                 <div class="feat-icon red">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                 </div>
-                <h3>Smart alerts</h3>
-                <p>Dynamic menu bar icon turns green/orange/red. Get notified before hitting rate limits.</p>
+                <h3>Rate limit alerts</h3>
+                <p>Menu bar icon turns green/orange/red based on usage. Get notified before hitting Claude rate limits.</p>
             </div>
             <div class="feat">
                 <div class="feat-icon purple">
@@ -1209,14 +1267,14 @@
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                 </div>
                 <h3>Completely free</h3>
-                <p>Uses your existing claude login credentials. No API key, no billing, zero cost.</p>
+                <p>Uses your existing Claude Pro, Max, or Team login. No API key, no billing, zero cost.</p>
             </div>
             <div class="feat">
                 <div class="feat-icon orange">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 </div>
-                <h3>Live countdown</h3>
-                <p>See exactly when your quotas reset. Session, weekly, per-model — all at a glance.</p>
+                <h3>Quota reset countdown</h3>
+                <p>See exactly when your Claude quotas reset. Session, weekly, per-model timers — never wonder again.</p>
             </div>
             <div class="feat">
                 <div class="feat-icon purple">
@@ -1229,8 +1287,8 @@
                 <div class="feat-icon green">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                 </div>
-                <h3>Pure SwiftUI</h3>
-                <p>Native macOS app. No Electron, no dependencies, no runtime overhead. Just Swift.</p>
+                <h3>Native macOS app</h3>
+                <p>Built with pure SwiftUI. No Electron, no dependencies, no runtime overhead. Lightweight and fast.</p>
             </div>
         </div>
     </div>
@@ -1306,6 +1364,44 @@
                     </a>
                 </div>
             </div>
+        </div>
+    </div>
+</section>
+
+<!-- FAQ -->
+<section class="section" id="faq" style="padding-top:2rem">
+    <div class="section-inner reveal">
+        <p class="section-label">FAQ</p>
+        <h2 class="section-title">Frequently asked questions</h2>
+        <div style="max-width:680px;margin:0 auto;text-align:left">
+            <details style="border-bottom:1px solid var(--border);padding:1rem 0">
+                <summary style="cursor:pointer;font-weight:600;color:var(--text);font-size:0.95rem">How do I check my Claude AI rate limits?</summary>
+                <p style="color:var(--text-2);margin-top:0.75rem;font-size:0.88rem;line-height:1.6">Install Claude God — it shows your Claude AI rate limits in real time with color-coded gauges in your macOS menu bar. It tracks session (5h), weekly, and per-model (Sonnet, Opus) quotas with live countdown timers showing exactly when limits reset.</p>
+            </details>
+            <details style="border-bottom:1px solid var(--border);padding:1rem 0">
+                <summary style="cursor:pointer;font-weight:600;color:var(--text);font-size:0.95rem">How much does Claude Code cost per day?</summary>
+                <p style="color:var(--text-2);margin-top:0.75rem;font-size:0.88rem;line-height:1.6">Claude God tracks your Claude Code spending in real time. It shows daily, weekly, and monthly costs broken down by model (Opus, Sonnet, Haiku) with 30-day trend charts. You can also export your cost data as CSV.</p>
+            </details>
+            <details style="border-bottom:1px solid var(--border);padding:1rem 0">
+                <summary style="cursor:pointer;font-weight:600;color:var(--text);font-size:0.95rem">How do I monitor Claude API usage on macOS?</summary>
+                <p style="color:var(--text-2);margin-top:0.75rem;font-size:0.88rem;line-height:1.6">Install Claude God with Homebrew: <code style="background:var(--surface-2);padding:2px 6px;border-radius:4px;font-size:0.82rem">brew tap lcharvol/tap && brew install --cask claude-god</code>. It reads your existing Claude login credentials — no separate API key needed. It monitors quotas, costs, tokens, and session history.</p>
+            </details>
+            <details style="border-bottom:1px solid var(--border);padding:1rem 0">
+                <summary style="cursor:pointer;font-weight:600;color:var(--text);font-size:0.95rem">Does Claude God work with Claude Pro, Max, and Team plans?</summary>
+                <p style="color:var(--text-2);margin-top:0.75rem;font-size:0.88rem;line-height:1.6">Yes. Claude God works with all Claude subscription plans that support Claude Code — including Pro, Max, and Team. It uses the same OAuth credentials as the Claude CLI, so any plan that works with <code style="background:var(--surface-2);padding:2px 6px;border-radius:4px;font-size:0.82rem">claude login</code> is supported.</p>
+            </details>
+            <details style="border-bottom:1px solid var(--border);padding:1rem 0">
+                <summary style="cursor:pointer;font-weight:600;color:var(--text);font-size:0.95rem">How do I know when my Claude quota resets?</summary>
+                <p style="color:var(--text-2);margin-top:0.75rem;font-size:0.88rem;line-height:1.6">Claude God shows live countdown timers for each quota directly in your menu bar. You can also configure threshold-based notifications (e.g. alert at 80% usage) so you know before you hit a rate limit.</p>
+            </details>
+            <details style="border-bottom:1px solid var(--border);padding:1rem 0">
+                <summary style="cursor:pointer;font-weight:600;color:var(--text);font-size:0.95rem">Is Claude God safe? Does it send my data anywhere?</summary>
+                <p style="color:var(--text-2);margin-top:0.75rem;font-size:0.88rem;line-height:1.6">Claude God is fully open source (MIT license) with zero telemetry. Your credentials never leave your Mac. It only communicates with the official Claude API to fetch your quota data — the same endpoint used by claude.ai. You can audit every line of code on GitHub.</p>
+            </details>
+            <details style="border-bottom:1px solid var(--border);padding:1rem 0">
+                <summary style="cursor:pointer;font-weight:600;color:var(--text);font-size:0.95rem">What is the Claude Code session timeline?</summary>
+                <p style="color:var(--text-2);margin-top:0.75rem;font-size:0.88rem;line-height:1.6">The session timeline lets you browse your Claude Code usage day by day. Each session shows the project name, time range, total cost, and model used. Click to expand and see individual messages with their token counts, model, and cost.</p>
+            </details>
         </div>
     </div>
 </section>

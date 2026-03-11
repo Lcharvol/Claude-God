@@ -305,7 +305,7 @@ class UsageManager: ObservableObject {
         self.launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         self.compactMode = UserDefaults.standard.bool(forKey: "compactMode")
         let savedDisplayMode = UserDefaults.standard.integer(forKey: "menuBarDisplayMode")
-        self.menuBarDisplayMode = MenuBarDisplayMode(rawValue: savedDisplayMode) ?? .percentage
+        self.menuBarDisplayMode = MenuBarDisplayMode(rawValue: savedDisplayMode) ?? .percentageAndTimer
 
         // Forward objectWillChange from sub-managers
         auth.objectWillChange.sink { [weak self] _ in

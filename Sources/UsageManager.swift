@@ -216,7 +216,7 @@ class UsageManager: ObservableObject {
     @Published var todayStats = UsageStats()
     @Published var weekStats = UsageStats()
     @Published var monthStats = UsageStats()
-    enum Tab: Int { case usage, analytics, timeline }
+    enum Tab: Int { case usage, analytics, timeline, roi }
     @Published var selectedTab: Tab = .usage
     @Published var isLoadingStats = false
     @Published var sessionHistory: [SessionInfo] = []
@@ -275,6 +275,9 @@ class UsageManager: ObservableObject {
     @Published var timelineSessions: [TimelineSession] = []
     @Published var timelineDate: Date = Date()
     @Published var isLoadingTimeline = false
+    @Published var roiStats: ROIStats = .empty
+    @Published var isLoadingROI = false
+    @Published var isGitAvailable = false
 
     // MARK: - État de l'interface
 
@@ -553,6 +556,7 @@ class UsageManager: ObservableObject {
         setupCountdownTimer()
         setupAutoRefresh()
         setupActiveSessionDetection()
+        isGitAvailable = GitAnalyzer.isGitAvailable()
 
         if notificationsEnabled {
             requestNotificationPermission()
@@ -625,6 +629,125 @@ class UsageManager: ObservableObject {
               next <= Date() else { return }
         timelineDate = next
         refreshTimeline()
+    }
+
+    // MARK: - ROI
+
+    private static let assistedWindowSeconds: TimeInterval = 2 * 60 * 60 // 2 hours
+
+    func refreshROI() {
+        guard isGitAvailable else { return }
+        isLoadingROI = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let stats = Self.computeROI()
+            DispatchQueue.main.async {
+                self?.roiStats = stats
+                self?.isLoadingROI = false
+            }
+        }
+    }
+
+    private static func computeROI() -> ROIStats {
+        let days = 30
+        let cal = Calendar.current
+
+        let allCommits = GitAnalyzer.allCommits(sinceDaysAgo: days)
+        guard !allCommits.isEmpty else { return .empty }
+
+        // Get all sessions for the last 30 days
+        var allSessions: [TimelineSession] = []
+        for dayOffset in 0..<days {
+            guard let date = cal.date(byAdding: .day, value: -dayOffset, to: Date()) else { continue }
+            allSessions.append(contentsOf: SessionAnalyzer.timelineSessions(for: date))
+        }
+
+        // A commit is assisted if it falls within session.start...session.end+2h for the same project
+        let assistedCommits = allCommits.filter { commit in
+            allSessions.contains { session in
+                let windowEnd = session.endTime.addingTimeInterval(assistedWindowSeconds)
+                let inTimeWindow = commit.date >= session.startTime && commit.date <= windowEnd
+                let projectMatch = commit.projectPath.lowercased().contains(session.projectName.lowercased())
+                return inTimeWindow && projectMatch
+            }
+        }
+
+        let totalCost = allSessions.reduce(0.0) { $0 + $1.cost }
+        let totalLines = assistedCommits.reduce(0) { $0 + $1.totalLinesChanged }
+        let costPerCommit = assistedCommits.isEmpty ? 0 : totalCost / Double(assistedCommits.count)
+        let costPerLine = totalLines == 0 ? 0 : totalCost / Double(totalLines)
+
+        // By project
+        let commitsByProject = Dictionary(grouping: assistedCommits, by: { $0.projectPath })
+        let sessionsByProject = Dictionary(grouping: allSessions, by: { $0.projectName.lowercased() })
+
+        let byProject: [ProjectROI] = commitsByProject.map { (path, commits) in
+            let projectName = path.split(separator: "/").last.map(String.init) ?? path
+            let projectSessions = sessionsByProject.first { path.lowercased().contains($0.key) }?.value ?? []
+            let projCost = projectSessions.reduce(0.0) { $0 + $1.cost }
+            let projLines = commits.reduce(0) { $0 + $1.totalLinesChanged }
+
+            var modelMap: [String: (cost: Double, count: Int)] = [:]
+            for session in projectSessions {
+                for msg in session.messages {
+                    let model = msg.model.contains("opus") ? "Opus" :
+                               msg.model.contains("sonnet") ? "Sonnet" :
+                               msg.model.contains("haiku") ? "Haiku" : msg.model
+                    let existing = modelMap[model] ?? (cost: 0, count: 0)
+                    modelMap[model] = (cost: existing.cost + msg.cost, count: existing.count + 1)
+                }
+            }
+            let totalModelCost = modelMap.values.reduce(0.0) { $0 + $1.cost }
+            let breakdown = modelMap.map { (model, data) in
+                let proportion = totalModelCost > 0 ? data.cost / totalModelCost : 0
+                return (model: model, cost: data.cost, commits: Int(Double(commits.count) * proportion))
+            }
+
+            return ProjectROI(
+                projectName: projectName,
+                totalCost: projCost,
+                assistedCommits: commits.count,
+                totalLinesChanged: projLines,
+                costPerCommit: commits.isEmpty ? 0 : projCost / Double(commits.count),
+                costPerLine: projLines == 0 ? 0 : projCost / Double(projLines),
+                modelBreakdown: breakdown
+            )
+        }.sorted { $0.totalCost > $1.totalCost }
+
+        // Daily trend
+        let dailyTrend: [(date: Date, cost: Double, commits: Int)] = (0..<days).compactMap { offset in
+            guard let date = cal.date(byAdding: .day, value: -offset, to: Date()) else { return nil }
+            let dayStart = cal.startOfDay(for: date)
+            guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { return nil }
+            let dayCost = allSessions.filter { $0.startTime >= dayStart && $0.startTime < dayEnd }
+                .reduce(0.0) { $0 + $1.cost }
+            let dayCommits = assistedCommits.filter { $0.date >= dayStart && $0.date < dayEnd }.count
+            return (date: dayStart, cost: dayCost, commits: dayCommits)
+        }.reversed()
+
+        // By model aggregate
+        var globalModelMap: [String: (cost: Double, commits: Double)] = [:]
+        for proj in byProject {
+            for bd in proj.modelBreakdown {
+                let existing = globalModelMap[bd.model] ?? (cost: 0, commits: 0)
+                globalModelMap[bd.model] = (cost: existing.cost + bd.cost, commits: existing.commits + Double(bd.commits))
+            }
+        }
+        let byModel = globalModelMap.map { (model, data) in
+            let avgCPC = data.commits > 0 ? data.cost / data.commits : 0
+            return (model: model, cost: data.cost, avgCostPerCommit: avgCPC)
+        }.sorted { $0.cost > $1.cost }
+
+        return ROIStats(
+            period: days,
+            totalCost: totalCost,
+            totalAssistedCommits: assistedCommits.count,
+            totalLinesChanged: totalLines,
+            costPerCommit: costPerCommit,
+            costPerLine: costPerLine,
+            byProject: byProject,
+            dailyTrend: Array(dailyTrend),
+            byModel: byModel
+        )
     }
 
     // MARK: - Active session detection

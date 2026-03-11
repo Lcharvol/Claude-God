@@ -30,6 +30,7 @@ enum ModelPricing {
                          cacheCreation: 1.0 / 1_000_000, cacheRead: 0.08 / 1_000_000)
         }
         // Default to Sonnet pricing for unknown models
+        print("[ClaudeGod] Unknown model '\(model)' — using Sonnet pricing as fallback")
         return Price(input: 3.0 / 1_000_000, output: 15.0 / 1_000_000,
                      cacheCreation: 3.75 / 1_000_000, cacheRead: 0.30 / 1_000_000)
     }
@@ -255,9 +256,9 @@ struct UsageStats {
             ? Double(totalRead) / Double(totalRead + totalCreated) * 100
             : 0
 
-        // Trend: compare first half vs second half of daily data
+        // Trend: compare first half vs second half (need ≥10 days for meaningful signal)
         var trend: Double = 0
-        if daily.count >= 4 {
+        if daily.count >= 10 {
             let sorted = daily.sorted { $0.date < $1.date }
             let mid = sorted.count / 2
             let firstHalf = sorted[0..<mid]
@@ -531,17 +532,22 @@ class SessionAnalyzer {
                       let lineData = line.data(using: .utf8)
                 else { return }
 
-                // Try to parse user messages for topic
-                if topic.isEmpty,
-                   let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                // Extract topic from first substantial human message (>20 chars)
+                if let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                    let type = json["type"] as? String, type == "human",
                    let message = json["message"] as? [String: Any] {
+                    var text = ""
                     if let contentStr = message["content"] as? String {
-                        topic = String(contentStr.prefix(100))
+                        text = contentStr
                     } else if let contentArr = message["content"] as? [[String: Any]],
                               let first = contentArr.first(where: { $0["type"] as? String == "text" }),
-                              let text = first["text"] as? String {
-                        topic = String(text.prefix(100))
+                              let t = first["text"] as? String {
+                        text = t
+                    }
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Prefer longer messages as topic (skip short "test", "ok", etc.)
+                    if topic.isEmpty || (trimmed.count > topic.count && topic.count < 20) {
+                        topic = String(trimmed.prefix(100))
                     }
                 }
 

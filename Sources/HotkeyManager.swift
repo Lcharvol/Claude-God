@@ -8,6 +8,7 @@ class HotkeyManager {
 
     static let shared = HotkeyManager()
 
+    private(set) var isRegistered = false
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
 
@@ -45,7 +46,7 @@ class HotkeyManager {
 
         let modifiers: UInt32 = UInt32(optionKey | cmdKey)
 
-        RegisterEventHotKey(
+        let status = RegisterEventHotKey(
             UInt32(kVK_ANSI_C),
             modifiers,
             hotkeyID,
@@ -54,7 +55,8 @@ class HotkeyManager {
             &hotKeyRef
         )
 
-        print("[ClaudeGod] Global hotkey ⌥⌘C registered")
+        isRegistered = (status == noErr)
+        print("[ClaudeGod] Global hotkey ⌥⌘C \(isRegistered ? "registered" : "FAILED to register")")
     }
 
     func unregister() {

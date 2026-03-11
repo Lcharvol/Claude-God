@@ -358,6 +358,16 @@ class UsageManager: ObservableObject {
         }
     }
 
+    /// Secondary color hint for distinguishing warning (half-fill) from critical
+    var menuBarIconOpacity: Double {
+        guard let q = worstQuota else { return 1.0 }
+        switch q.level {
+        case .critical: return 1.0
+        case .warning: return 0.7
+        case .good: return 1.0
+        }
+    }
+
     var menuBarIconColor: Color {
         guard let q = worstQuota else { return .primary }
         return q.level.color
@@ -438,6 +448,8 @@ class UsageManager: ObservableObject {
     private var autoRefreshTimer: AnyCancellable?
     private var activeSessionTimer: AnyCancellable?
     private var cancellables = Set<AnyCancellable>()
+    private var isRefreshingToken = false
+    private var statsWorkItem: DispatchWorkItem?
 
     // Track previous quota utilizations for reset detection
     private var previousQuotaUtilizations: [String: Double] = [:]
@@ -539,7 +551,10 @@ class UsageManager: ObservableObject {
         guard !isLoadingStats else { return }
         isLoadingStats = true
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        // Cancel any previous in-flight stats work
+        statsWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
             let cal = Calendar.current
             let now = Date()
             let todayStart = cal.startOfDay(for: now)
@@ -561,12 +576,15 @@ class UsageManager: ObservableObject {
                 print("[ClaudeGod] Stats: today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost)) projects=\(month.byProject.count) sessions=\(sessions.count)")
             }
         }
+        statsWorkItem = workItem
+        DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
     }
 
     // MARK: - Active session detection
 
     private func setupActiveSessionDetection() {
-        activeSessionTimer = Timer.publish(every: 10, on: .main, in: .common)
+        // Check every 15s for active session (was 10s). Only computes live cost when active.
+        activeSessionTimer = Timer.publish(every: 15, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 self?.checkActiveSession()
@@ -624,10 +642,13 @@ class UsageManager: ObservableObject {
         }
 
         if auth.tokenNeedsRefresh && auth.refreshToken != nil {
+            guard !isRefreshingToken else { return }
+            isRefreshingToken = true
             isLoading = true
             errorMessage = nil
             auth.refreshAccessToken { [weak self] success in
                 guard let self else { return }
+                self.isRefreshingToken = false
                 if success {
                     self.fetchUsage()
                 } else {
@@ -733,9 +754,15 @@ class UsageManager: ObservableObject {
                     if !self.quotas.isEmpty {
                         self.isLoading = false
                         print("[ClaudeGod] Rate limited (429), keeping existing data")
+                    } else if retryCount < Self.maxRetries {
+                        let delay = pow(2.0, Double(retryCount)) + 2 // longer delay for 429
+                        print("[ClaudeGod] Rate limited (429), retrying in \(Int(delay))s...")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                            self.fetchUsage(retryCount: retryCount + 1)
+                        }
                     } else {
                         self.isLoading = false
-                        self.errorMessage = "Rate limited — Claude Code may be active"
+                        self.errorMessage = "Rate limited — try again in a few seconds"
                     }
 
                 default:
@@ -827,17 +854,26 @@ class UsageManager: ObservableObject {
         }
         let remaining = reset.timeIntervalSinceNow
         if remaining <= 0 {
-            timeUntilReset = "now"
+            if timeUntilReset != "resetting..." {
+                timeUntilReset = "resetting..."
+                // Auto-refresh after reset
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    self?.refresh()
+                }
+            }
             return
         }
         let hours = Int(remaining) / 3600
         let minutes = (Int(remaining) % 3600) / 60
         let newValue: String
         if menuBarDisplayMode == .percentageAndTimer {
-            let seconds = Int(remaining) % 60
-            newValue = hours > 0
-                ? "\(hours)h \(minutes)m \(seconds)s"
-                : "\(minutes)m \(seconds)s"
+            // Keep menu bar compact: skip seconds when > 1h
+            if hours > 0 {
+                newValue = "\(hours)h\(String(format: "%02d", minutes))m"
+            } else {
+                let seconds = Int(remaining) % 60
+                newValue = "\(minutes)m\(String(format: "%02d", seconds))s"
+            }
         } else {
             newValue = hours > 0
                 ? "\(hours)h \(minutes)m"
@@ -901,7 +937,8 @@ class UsageManager: ObservableObject {
                     )
                     UNUserNotificationCenter.current().add(request)
                     updated.insert(key)
-                } else if quota.utilization < threshold {
+                } else if quota.utilization < threshold - 5 {
+                    // Hysteresis: must drop 5% below to re-arm
                     updated.remove(key)
                 }
             }
@@ -954,7 +991,8 @@ class UsageManager: ObservableObject {
                 UNUserNotificationCenter.current().add(request)
                 customAlertRules[i].notified = true
             } else if let quota = quotas.first(where: { $0.label == rule.quotaLabel }),
-                      quota.utilization < rule.threshold && rule.notified {
+                      quota.utilization < rule.threshold - 10 && rule.notified {
+                // Hysteresis: must drop 10% below threshold to re-arm
                 customAlertRules[i].notified = false
             }
         }
@@ -1012,10 +1050,8 @@ class UsageManager: ObservableObject {
     func switchAccount(index: Int) {
         guard index >= 0 && index < accounts.count else { return }
         activeAccountIndex = index
-        // Reload credentials from the selected account's path
-        // For now, accounts use the default credentials path
         auth.loadCredentials()
-        quotas = []
+        // Don't clear quotas — keep old data until new ones arrive
         refresh()
     }
 
@@ -1103,6 +1139,8 @@ class UsageManager: ObservableObject {
         return NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
     }
 
+    @Published var csvExportSuccess: Bool?
+
     func exportCSV() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.commaSeparatedText]
@@ -1110,7 +1148,7 @@ class UsageManager: ObservableObject {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        var csv = "Date,Cost,Messages,Input Tokens,Output Tokens,Cache Create,Cache Read\n"
+        var csv = "Date,Cost,Messages,Input Tokens,Output Tokens,Cache Creation,Cache Read\n"
         for day in monthStats.daily.reversed() {
             let dateStr = Formatters.csvDate.string(from: day.date)
             csv += "\(dateStr),\(String(format: "%.4f", day.cost)),\(day.messageCount),"
@@ -1118,6 +1156,15 @@ class UsageManager: ObservableObject {
             csv += "\(day.tokens.cacheCreationTokens),\(day.tokens.cacheReadTokens)\n"
         }
 
-        try? csv.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+            csvExportSuccess = true
+        } catch {
+            csvExportSuccess = false
+            print("[ClaudeGod] CSV export failed: \(error.localizedDescription)")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.csvExportSuccess = nil
+        }
     }
 }

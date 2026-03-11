@@ -282,7 +282,10 @@ struct MenuBarView: View {
                         Text("$")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
-                        TextField("0", value: $manager.dailyBudget, format: .number.precision(.fractionLength(0...2)))
+                        TextField("Not set", value: Binding(
+                            get: { manager.dailyBudget > 0 ? manager.dailyBudget : nil },
+                            set: { manager.dailyBudget = $0 ?? 0 }
+                        ), format: .number.precision(.fractionLength(0...2)))
                             .font(.system(size: 12, design: .monospaced))
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 70)
@@ -330,8 +333,11 @@ struct MenuBarView: View {
                         Spacer()
                         if !manager.quotas.isEmpty {
                             SHButton(label: "Add", icon: "plus", style: .ghost) {
-                                let defaultQuota = manager.quotas.first?.label ?? "Session (5h)"
-                                manager.customAlertRules.append(AlertRule(quotaLabel: defaultQuota, threshold: 80))
+                                // Pick a quota that doesn't already have a rule at 80%
+                                let existing = Set(manager.customAlertRules.map { "\($0.quotaLabel)-\(Int($0.threshold))" })
+                                let available = manager.quotas.first(where: { !existing.contains("\($0.label)-80") })
+                                let quotaLabel = available?.label ?? manager.quotas.first?.label ?? "Session (5h)"
+                                manager.customAlertRules.append(AlertRule(quotaLabel: quotaLabel, threshold: 80))
                             }
                         }
                     }
@@ -452,6 +458,16 @@ struct MenuBarView: View {
                         Text("⌥⌘C Toggle · ⌘R Refresh · ⌘1 Usage · ⌘2 Analytics")
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundColor(.secondary.opacity(0.6))
+                    }
+                    if !HotkeyManager.shared.isRegistered {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 8))
+                                .foregroundColor(.orange)
+                            Text("⌥⌘C hotkey failed to register")
+                                .font(.system(size: 9))
+                                .foregroundColor(.orange)
+                        }
                     }
                 }
             }
@@ -751,38 +767,42 @@ struct MenuBarView: View {
                     }
                 }
 
-                // Models
+                // Models (aggregated by short name)
                 if !manager.monthStats.byModel.isEmpty {
                     SHCard {
                         VStack(alignment: .leading, spacing: 8) {
                             SHLabel("Models")
-                            ForEach(manager.monthStats.byModel) { model in
+                            ForEach(aggregatedModels) { model in
                                 HStack(spacing: 6) {
                                     Circle()
                                         .fill(colorForModel(model.model))
                                         .frame(width: 6, height: 6)
                                     Text(model.shortName)
                                         .font(.system(size: 11, weight: .medium))
+                                        .frame(width: 50, alignment: .leading)
                                     Spacer()
                                     Text(formatTokens(model.tokens.totalTokens))
                                         .font(.system(size: 10, design: .monospaced))
                                         .foregroundColor(.secondary)
-                                    Text(formatCost(model.cost))
+                                    Text(formatCostCompact(model.cost))
                                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                        .frame(width: 48, alignment: .trailing)
+                                        .frame(width: 64, alignment: .trailing)
+                                        .lineLimit(1)
                                 }
                             }
                             SHDivider()
                             HStack(spacing: 6) {
                                 Text("Total")
                                     .font(.system(size: 11, weight: .semibold))
+                                    .frame(width: 56, alignment: .leading)
                                 Spacer()
                                 Text(formatTokens(manager.monthStats.totalTokens.totalTokens))
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundColor(.secondary)
-                                Text(formatCost(manager.monthStats.totalCost))
+                                Text(formatCostCompact(manager.monthStats.totalCost))
                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .frame(width: 48, alignment: .trailing)
+                                    .frame(width: 64, alignment: .trailing)
+                                    .lineLimit(1)
                             }
                         }
                     }
@@ -976,7 +996,11 @@ struct MenuBarView: View {
                         }
                     }
 
-                    SHButton(label: "CSV", icon: "square.and.arrow.up", style: .outline) {
+                    SHButton(
+                        label: manager.csvExportSuccess == true ? "Saved!" : manager.csvExportSuccess == false ? "Failed" : "CSV",
+                        icon: manager.csvExportSuccess == true ? "checkmark" : "square.and.arrow.up",
+                        style: manager.csvExportSuccess == true ? .success : .outline
+                    ) {
                         manager.exportCSV()
                     }
 
@@ -1113,6 +1137,20 @@ struct MenuBarView: View {
         }
     }
 
+    /// Aggregate models by short name (merges e.g. claude-3-opus + claude-opus-4)
+    private var aggregatedModels: [ModelUsage] {
+        var groups: [String: (tokens: TokenUsage, cost: Double, model: String)] = [:]
+        for m in manager.monthStats.byModel {
+            let key = m.shortName
+            var existing = groups[key] ?? (tokens: TokenUsage(), cost: 0, model: m.model)
+            existing.tokens.add(m.tokens)
+            existing.cost += m.cost
+            groups[key] = existing
+        }
+        return groups.map { ModelUsage(model: $0.value.model, tokens: $0.value.tokens, cost: $0.value.cost) }
+            .sorted { $0.cost > $1.cost }
+    }
+
     private var maxDailyCost: Double {
         manager.monthStats.daily.prefix(dailyRange).map(\.cost).max() ?? 1
     }
@@ -1190,6 +1228,14 @@ struct MenuBarView: View {
     // MARK: - Helpers
 
     private func formatCost(_ cost: Double) -> String {
+        if cost >= 0.01 { return String(format: "$%.2f", cost) }
+        return String(format: "$%.3f", cost)
+    }
+
+    /// Compact cost formatting for tight layouts (no decimals for large amounts)
+    private func formatCostCompact(_ cost: Double) -> String {
+        if cost >= 1000 { return String(format: "$%.0f", cost) }
+        if cost >= 100 { return String(format: "$%.1f", cost) }
         if cost >= 0.01 { return String(format: "$%.2f", cost) }
         return String(format: "$%.3f", cost)
     }

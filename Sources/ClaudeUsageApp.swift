@@ -21,7 +21,7 @@ struct ClaudeGodApp: App {
             HStack(spacing: 4) {
                 Image(systemName: manager.menuBarIcon)
                     .symbolRenderingMode(.palette)
-                    .foregroundStyle(manager.menuBarIconColor)
+                    .foregroundStyle(manager.menuBarIconColor.opacity(manager.menuBarIconOpacity))
                 if manager.isSessionActive {
                     Circle()
                         .fill(.green)

@@ -851,8 +851,13 @@
 
         .how-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(3, 1fr);
             gap: 2rem;
+        }
+
+        .how-step code {
+            font-size: 0.78rem;
+            word-break: break-all;
         }
 
         .how-step {
@@ -1345,7 +1350,7 @@
             <div class="how-step">
                 <div class="how-num">1</div>
                 <h3>Install via Homebrew</h3>
-                <p>Run <code>brew tap lcharvol/tap && brew install --cask claude-god</code> in Terminal. That's it.</p>
+                <p>Run <code>brew install lcharvol/tap/claude-god</code> in Terminal. That's it.</p>
             </div>
             <div class="how-step">
                 <div class="how-num">2</div>

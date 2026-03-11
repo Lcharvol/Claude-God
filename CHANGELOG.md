@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.0] - 2026-03-11
+
+### Added
+- Burn rate prediction: estimates when you'll hit quota limit based on current velocity
+- Per-project cost breakdown: shows top projects with cost, messages, and session count
+- Session history: recent conversations with topic, duration, cost, and model
+- Model advisor: smart tips when quota imbalance is detected (e.g. switch to Sonnet)
+- Reset notifications: alerts when a quota resets (detects drop from >50% to <10%)
+- Active session detection: green pulsing dot when Claude Code is running (checks JSONL file modification)
+- Daily budget tracking: set a $/day target with progress bar
+- README screenshots: usage and analytics views illustrated at top of README
+
 ## [2.5.0] - 2026-03-11
 
 ### Added

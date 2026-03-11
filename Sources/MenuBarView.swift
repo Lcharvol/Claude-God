@@ -57,6 +57,8 @@ struct MenuBarView: View {
                         statsView
                     } else if manager.selectedTab == .timeline {
                         timelineView
+                    } else if manager.selectedTab == .roi {
+                        roiView
                     } else if manager.isLoading && manager.lastRefresh == nil {
                         loadingView
                     } else if let error = manager.errorMessage {
@@ -83,7 +85,7 @@ struct MenuBarView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
         }
-        .frame(width: manager.compactMode && !manager.showSettings && manager.selectedTab == .usage ? 280 : 340)
+        .frame(width: manager.compactMode && !manager.showSettings && manager.selectedTab == .usage ? 280 : 380)
         .animation(.easeOut(duration: 0.15), value: manager.selectedTab)
         .animation(.easeOut(duration: 0.15), value: manager.showSettings)
     }
@@ -165,6 +167,13 @@ struct MenuBarView: View {
                 }
             }
             .keyboardShortcut("3", modifiers: .command)
+            SHTab(label: "ROI", isActive: manager.selectedTab == .roi) {
+                manager.selectedTab = .roi
+                if manager.roiStats.totalAssistedCommits == 0 && !manager.isLoadingROI {
+                    manager.refreshROI()
+                }
+            }
+            .keyboardShortcut("4", modifiers: .command)
         }
         .padding(2)
         .background(
@@ -464,7 +473,7 @@ struct MenuBarView: View {
                         }
                     }
                     HStack(spacing: 8) {
-                        Text("⌥⌘C Toggle · ⌘R Refresh · ⌘1 Usage · ⌘2 Analytics · ⌘3 Timeline")
+                        Text("⌥⌘C Toggle · ⌘R Refresh · ⌘1 Usage · ⌘2 Analytics · ⌘3 Timeline · ⌘4 ROI")
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundColor(.secondary.opacity(0.6))
                     }
@@ -1384,6 +1393,171 @@ struct MenuBarView: View {
         case "Sonnet": return .blue
         case "Haiku": return .green
         default: return .secondary
+        }
+    }
+
+    // MARK: - ROI View
+
+    @ViewBuilder
+    private var roiView: some View {
+        if !manager.isGitAvailable {
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 24))
+                    .foregroundColor(.orange)
+                Text("Git not found")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Install Git to see your ROI metrics.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 200)
+        } else if manager.isLoadingROI {
+            VStack(spacing: 8) {
+                ProgressView()
+                Text("Analyzing git history...")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 200)
+        } else if manager.roiStats.totalAssistedCommits == 0 {
+            VStack(spacing: 12) {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(.system(size: 24))
+                    .foregroundColor(.secondary)
+                Text("No data yet")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Use Claude Code and commit to see your ROI.\nCommits within 2h of a session are tracked.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Refresh") { manager.refreshROI() }
+                    .font(.system(size: 11))
+            }
+            .frame(maxWidth: .infinity, minHeight: 200)
+        } else {
+            roiContent
+        }
+    }
+
+    @ViewBuilder
+    private var roiContent: some View {
+        let stats = manager.roiStats
+        VStack(alignment: .leading, spacing: 12) {
+            // Header stat cards
+            HStack(spacing: 8) {
+                SHStatCard(label: "Cost (30d)", value: formatCostCompact(stats.totalCost), sub: "\(stats.period) days")
+                SHStatCard(label: "Commits", value: "\(stats.totalAssistedCommits)", sub: "\(stats.totalLinesChanged) lines")
+                SHStatCard(label: "$/commit", value: formatCostCompact(stats.costPerCommit), sub: formatCostCompact(stats.costPerLine) + "/line")
+            }
+
+            // Daily trend sparkline
+            if !stats.dailyTrend.isEmpty {
+                SHCard {
+                    VStack(alignment: .leading, spacing: 6) {
+                        SHLabel("30-day trend")
+                        roiSparkline(data: stats.dailyTrend)
+                    }
+                }
+            }
+
+            // By project
+            if !stats.byProject.isEmpty {
+                SHCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SHLabel("Projects")
+                        ForEach(stats.byProject.prefix(5)) { project in
+                            HStack(spacing: 6) {
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(Theme.accent)
+                                    .frame(width: 3, height: 20)
+                                Text(project.projectName)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .lineLimit(1)
+                                Spacer()
+                                Text("\(project.assistedCommits)c")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                Text(formatCostCompact(project.costPerCommit) + "/c")
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .fixedSize()
+                            }
+                        }
+                    }
+                }
+            }
+
+            // By model
+            if !stats.byModel.isEmpty {
+                SHCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SHLabel("Model efficiency")
+                        ForEach(Array(stats.byModel.enumerated()), id: \.offset) { _, entry in
+                            HStack {
+                                Circle()
+                                    .fill(modelColor(entry.model))
+                                    .frame(width: 8, height: 8)
+                                Text(entry.model)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .frame(width: 50, alignment: .leading)
+                                Spacer()
+                                Text(formatCostCompact(entry.cost))
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                Text(formatCostCompact(entry.avgCostPerCommit) + "/commit")
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .fixedSize()
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Trend summary
+            roiTrendSummary(stats: stats)
+        }
+    }
+
+    private func roiSparkline(data: [(date: Date, cost: Double, commits: Int)]) -> some View {
+        let maxCommits = data.map(\.commits).max() ?? 1
+        return HStack(alignment: .bottom, spacing: 1) {
+            ForEach(Array(data.enumerated()), id: \.offset) { _, entry in
+                let height = maxCommits > 0 ? CGFloat(entry.commits) / CGFloat(maxCommits) : 0
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(entry.commits > 0 ? Theme.accent.opacity(0.7) : Theme.muted)
+                    .frame(height: max(2, height * 40))
+            }
+        }
+        .frame(height: 44)
+    }
+
+    @ViewBuilder
+    private func roiTrendSummary(stats: ROIStats) -> some View {
+        let trend = stats.dailyTrend
+        if trend.count >= 10 {
+            let mid = trend.count / 2
+            let firstHalf = trend[0..<mid]
+            let secondHalf = trend[mid...]
+            let firstCommits = firstHalf.reduce(0) { $0 + $1.commits }
+            let secondCommits = secondHalf.reduce(0) { $0 + $1.commits }
+            let firstCost = firstHalf.reduce(0.0) { $0 + $1.cost }
+            let secondCost = secondHalf.reduce(0.0) { $0 + $1.cost }
+            let firstCPC = firstCommits > 0 ? firstCost / Double(firstCommits) : 0
+            let secondCPC = secondCommits > 0 ? secondCost / Double(secondCommits) : 0
+
+            if firstCPC > 0 {
+                let pctChange = ((secondCPC - firstCPC) / firstCPC) * 100
+                let improved = pctChange < 0
+                HStack {
+                    Image(systemName: improved ? "arrow.down.right" : "arrow.up.right")
+                        .font(.system(size: 10))
+                        .foregroundColor(improved ? .green : .orange)
+                    Text("Cost/commit \(improved ? "decreased" : "increased") \(String(format: "%.0f", abs(pctChange)))% this month")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 4)
+            }
         }
     }
 

@@ -442,7 +442,8 @@ class UsageManager: ObservableObject {
     // MARK: - Private
 
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    private static let maxRetries = 3
+    private static let maxRetries = 5
+    private var rateLimitedUntil: Date?
 
     private var countdownTimer: AnyCancellable?
     private var autoRefreshTimer: AnyCancellable?
@@ -641,6 +642,17 @@ class UsageManager: ObservableObject {
             return
         }
 
+        // Respect rate limit cooldown
+        if let until = rateLimitedUntil, Date() < until {
+            let remaining = Int(until.timeIntervalSince(Date()))
+            if remaining > 0 {
+                errorMessage = "Rate limited — retry in \(remaining)s"
+                print("[ClaudeGod] Skipping refresh, rate limited for \(remaining)s more")
+                return
+            }
+            rateLimitedUntil = nil
+        }
+
         if auth.tokenNeedsRefresh && auth.refreshToken != nil {
             guard !isRefreshingToken else { return }
             isRefreshingToken = true
@@ -751,18 +763,39 @@ class UsageManager: ObservableObject {
                     }
 
                 case 429:
-                    if !self.quotas.isEmpty {
+                    // Retry-After: 0 usually means stale token, not real rate limit
+                    let retryAfterHeader = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                    let retryAfterValue = retryAfterHeader.flatMap(Double.init) ?? -1
+                    let isLikelyStaleToken = retryAfterValue == 0
+
+                    if isLikelyStaleToken && self.auth.refreshToken != nil && retryCount == 0 {
+                        // Token likely expired server-side — refresh and retry once
+                        print("[ClaudeGod] 429 with Retry-After:0 — likely stale token, refreshing...")
+                        self.auth.refreshAccessToken { success in
+                            if success {
+                                print("[ClaudeGod] Token refreshed, retrying fetch...")
+                                self.fetchUsage(retryCount: retryCount + 1)
+                            } else {
+                                DispatchQueue.main.async {
+                                    self.isLoading = false
+                                    self.errorMessage = "Session expired — run `claude login`"
+                                }
+                            }
+                        }
+                    } else if !self.quotas.isEmpty {
+                        // We have cached data — keep it silently
                         self.isLoading = false
+                        self.rateLimitedUntil = Date().addingTimeInterval(30)
                         print("[ClaudeGod] Rate limited (429), keeping existing data")
                     } else if retryCount < Self.maxRetries {
-                        let delay = pow(2.0, Double(retryCount)) + 2 // longer delay for 429
-                        print("[ClaudeGod] Rate limited (429), retrying in \(Int(delay))s...")
+                        let delay = 5 * pow(2.0, Double(retryCount))
+                        print("[ClaudeGod] Rate limited (429), retrying in \(Int(delay))s (attempt \(retryCount + 1)/\(Self.maxRetries))...")
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                             self.fetchUsage(retryCount: retryCount + 1)
                         }
                     } else {
                         self.isLoading = false
-                        self.errorMessage = "Rate limited — try again in a few seconds"
+                        self.errorMessage = "Rate limited — run `claude login` to refresh"
                     }
 
                 default:

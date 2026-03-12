@@ -135,35 +135,12 @@ class AuthManager: ObservableObject {
                 if let expiresIn = json["expires_in"] as? Int {
                     self.tokenExpiresAt = Date().timeIntervalSince1970 * 1000 + Double(expiresIn) * 1000
                 }
-                Log.info("Token refreshed successfully")
-                self.persistTokens()
+                Log.info("Token refreshed successfully (in-memory only)")
+                // Do NOT persist tokens to disk — Claude Code manages credentials.
+                // Writing here would invalidate Claude Code's refresh token (single-use).
                 completion(true)
             }
         }.resume()
-    }
-
-    // MARK: - Token persistence
-
-    private func persistTokens() {
-        guard credentialSource == .file else { return }
-
-        do {
-            let data = try Data(contentsOf: Self.credentialsPath)
-            guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  var oauth = json["claudeAiOauth"] as? [String: Any]
-            else { return }
-
-            oauth["accessToken"] = accessToken
-            if let rt = refreshToken { oauth["refreshToken"] = rt }
-            if let exp = tokenExpiresAt { oauth["expiresAt"] = exp }
-            json["claudeAiOauth"] = oauth
-
-            let updated = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
-            try updated.write(to: Self.credentialsPath, options: .atomic)
-            Log.info("Tokens persisted to credentials file")
-        } catch {
-            Log.error("Failed to persist tokens: \(error.localizedDescription)")
-        }
     }
 
     // MARK: - Credentials file watcher

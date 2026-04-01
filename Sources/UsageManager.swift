@@ -346,6 +346,22 @@ class UsageManager: ObservableObject {
         }
     }
 
+    @Published var opaqueBackground: Bool {
+        didSet {
+            UserDefaults.standard.set(opaqueBackground, forKey: "opaqueBackground")
+        }
+    }
+
+    @Published var backgroundColorHex: String? {
+        didSet {
+            if let hex = backgroundColorHex {
+                UserDefaults.standard.set(hex, forKey: "backgroundColorHex")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "backgroundColorHex")
+            }
+        }
+    }
+
     // MARK: - Propriétés calculées
 
     var primaryQuota: UsageQuota? {
@@ -563,6 +579,8 @@ class UsageManager: ObservableObject {
         let savedDisplayMode = ud.integer(forKey: UDKey.menuBarDisplayMode)
         self.menuBarDisplayMode = MenuBarDisplayMode(rawValue: savedDisplayMode) ?? .percentageAndTimer
         self.dailyBudget = ud.double(forKey: UDKey.dailyBudget)
+        self.opaqueBackground = ud.bool(forKey: "opaqueBackground")
+        self.backgroundColorHex = ud.string(forKey: "backgroundColorHex")
 
         // Load per-project budgets
         if let data = ud.data(forKey: UDKey.projectBudgets),

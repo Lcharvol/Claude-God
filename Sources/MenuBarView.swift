@@ -12,8 +12,47 @@ private enum Theme {
     static let borderHover = Color.primary.opacity(0.15)
     static let muted = Color.primary.opacity(0.04)
     static let mutedHover = Color.primary.opacity(0.08)
-    static let accent = Color(red: 0.56, green: 0.39, blue: 0.98)  // indigo-ish
+    static let accent = Color(red: 0.56, green: 0.39, blue: 0.98)
     static let accentMuted = Color(red: 0.56, green: 0.39, blue: 0.98).opacity(0.1)
+
+    struct ColorPreset {
+        let hex: String
+        let name: String
+    }
+
+
+    static let backgroundPresets: [ColorPreset] = [
+        .init(hex: "FFFFFF", name: "White"),
+        .init(hex: "D6E4FF", name: "Blue"),
+        .init(hex: "D1FAE5", name: "Green"),
+        .init(hex: "FFE4CC", name: "Peach"),
+        .init(hex: "FBCFE8", name: "Pink"),
+        .init(hex: "DDD6FE", name: "Lavender"),
+        .init(hex: "C7F5FE", name: "Cyan"),
+        .init(hex: "FEF3C7", name: "Cream"),
+    ]
+}
+
+
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let scanner = Scanner(string: hex)
+        var rgb: UInt64 = 0
+        scanner.scanHexInt64(&rgb)
+        let r = Double((rgb >> 16) & 0xFF) / 255.0
+        let g = Double((rgb >> 8) & 0xFF) / 255.0
+        let b = Double(rgb & 0xFF) / 255.0
+        self.init(red: r, green: g, blue: b)
+    }
+
+    var hexString: String {
+        guard let components = NSColor(self).usingColorSpace(.sRGB) else { return "8F63FB" }
+        let r = Int(components.redComponent * 255)
+        let g = Int(components.greenComponent * 255)
+        let b = Int(components.blueComponent * 255)
+        return String(format: "%02X%02X%02X", r, g, b)
+    }
 }
 
 // MARK: - Main view
@@ -91,6 +130,9 @@ struct MenuBarView: View {
                 .padding(.vertical, 8)
         }
         .frame(width: manager.compactMode && !manager.showSettings && manager.selectedTab == .usage ? 300 : 400)
+        .background(manager.backgroundColorHex.map { hex in
+            manager.opaqueBackground ? Color(hex: hex) : Color(hex: hex).opacity(0.25)
+        })
         .animation(.easeOut(duration: 0.15), value: manager.selectedTab)
         .animation(.easeOut(duration: 0.15), value: manager.showSettings)
         .onAppear {
@@ -486,6 +528,43 @@ struct MenuBarView: View {
                         .font(.system(size: 12))
                         .toggleStyle(.switch)
                         .controlSize(.small)
+                    SHDivider()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Background")
+                            .font(.system(size: 12))
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color.clear)
+                                .frame(width: 22, height: 22)
+                                .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 1))
+                                .overlay(
+                                    Image(systemName: "sparkle")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.secondary)
+                                )
+                                .overlay(
+                                    Circle().stroke(Color.primary.opacity(manager.backgroundColorHex == nil ? 0.6 : 0), lineWidth: 2)
+                                )
+                                .onTapGesture { manager.backgroundColorHex = nil }
+
+                            ForEach(Theme.backgroundPresets, id: \.hex) { preset in
+                                Circle()
+                                    .fill(Color(hex: preset.hex))
+                                    .frame(width: 22, height: 22)
+                                    .overlay(Circle().stroke(Color.primary.opacity(0.1), lineWidth: 1))
+                                    .overlay(
+                                        Circle().stroke(Color.primary.opacity(manager.backgroundColorHex == preset.hex ? 0.6 : 0), lineWidth: 2)
+                                    )
+                                    .onTapGesture { manager.backgroundColorHex = preset.hex }
+                            }
+                        }
+                        if manager.backgroundColorHex != nil {
+                            Toggle("Opaque", isOn: $manager.opaqueBackground)
+                                .font(.system(size: 12))
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                        }
+                    }
                 }
             }
 
@@ -3721,7 +3800,7 @@ struct HeatmapGrid: View {
 
     private func color(for day: HeatmapDay) -> Color {
         let level = day.intensity(maxCost: maxCost)
-        let base = Color(red: 0.56, green: 0.39, blue: 0.98)
+        let base = Theme.accent
         switch level {
         case 0: return colorScheme == .dark ? Color.primary.opacity(0.06) : Color.primary.opacity(0.04)
         case 1: return base.opacity(0.25)
@@ -3761,7 +3840,7 @@ struct HeatmapGrid: View {
                     RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                         .fill(level == 0
                             ? (colorScheme == .dark ? Color.primary.opacity(0.06) : Color.primary.opacity(0.04))
-                            : Color(red: 0.56, green: 0.39, blue: 0.98).opacity(Double(level) * 0.25))
+                            : Theme.accent.opacity(Double(level) * 0.25))
                         .frame(width: 7, height: 7)
                 }
                 Text("More")

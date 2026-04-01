@@ -36,7 +36,8 @@ enum MenuBarDisplayMode: Int, CaseIterable, Identifiable {
     case iconOnly = 0
     case percentage = 1
     case percentageAndTimer = 2
-    case allQuotas = 3
+    case fullDashboard = 3
+    case allQuotas = 4
 
     var id: Int { rawValue }
 
@@ -45,6 +46,7 @@ enum MenuBarDisplayMode: Int, CaseIterable, Identifiable {
         case .iconOnly: return "Icon"
         case .percentage: return "Session"
         case .percentageAndTimer: return "Timer"
+        case .fullDashboard: return "Dashboard"
         case .allQuotas: return "All"
         }
     }
@@ -54,6 +56,7 @@ enum MenuBarDisplayMode: Int, CaseIterable, Identifiable {
         case .iconOnly: return "C"
         case .percentage: return "C 15%"
         case .percentageAndTimer: return "C 15% · 2h31m"
+        case .fullDashboard: return "C 15% · 2h31m | 9% · 5j"
         case .allQuotas: return "C 15% | 31% | 22%"
         }
     }
@@ -206,6 +209,8 @@ class UsageManager: ObservableObject {
     @Published var errorMessage: String?
     @Published var lastRefresh: Date?
     @Published var timeUntilReset: String = "—"
+    @Published var timeUntilSessionReset: String = "—"
+    @Published var timeUntilWeeklyReset: String = "—"
 
     // MARK: - Live session cost
 
@@ -347,6 +352,14 @@ class UsageManager: ObservableObject {
         quotas.first(where: { $0.label.contains("Session") }) ?? quotas.first
     }
 
+    var sessionQuota: UsageQuota? {
+        quotas.first(where: { $0.label.contains("Session") })
+    }
+
+    var weeklyQuota: UsageQuota? {
+        quotas.first(where: { $0.label.contains("Weekly") })
+    }
+
     /// The quota with the highest utilization (worst state)
     private var worstQuota: UsageQuota? {
         quotas.max(by: { $0.utilization < $1.utilization })
@@ -366,6 +379,18 @@ class UsageManager: ObservableObject {
         case .allQuotas:
             if quotas.isEmpty { return "—" }
             return quotas.map { "\(Int($0.utilization))%" }.joined(separator: " | ")
+        case .fullDashboard:
+            let sessionPart: String = {
+                guard let s = sessionQuota else { return "—" }
+                let timer = timeUntilSessionReset == "—" ? "" : " · \(timeUntilSessionReset)"
+                return "\(Int(s.utilization))%\(timer)"
+            }()
+            let weeklyPart: String = {
+                guard let w = weeklyQuota else { return "—" }
+                let timer = timeUntilWeeklyReset == "—" ? "" : " · \(timeUntilWeeklyReset)"
+                return "\(Int(w.utilization))%\(timer)"
+            }()
+            return "\(sessionPart) | \(weeklyPart)"
         }
     }
 
@@ -1160,12 +1185,27 @@ class UsageManager: ObservableObject {
 
     private func setupCountdownTimer() {
         countdownTimer?.cancel()
-        let interval: TimeInterval = menuBarDisplayMode == .percentageAndTimer ? 1 : 30
+        let needsFastTimer = menuBarDisplayMode == .percentageAndTimer || menuBarDisplayMode == .fullDashboard
+        let interval: TimeInterval = needsFastTimer ? 1 : 30
         countdownTimer = Timer.publish(every: interval, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 self?.updateCountdown()
             }
+    }
+
+    /// Format a time interval as the largest meaningful unit only
+    private static func compactTimeString(_ remaining: TimeInterval) -> String {
+        let totalSeconds = Int(remaining)
+        let days = totalSeconds / 86400
+        let hours = (totalSeconds % 86400) / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if days > 0 { return "\(days)j" }
+        if hours > 0 { return "\(hours)h\(String(format: "%02d", minutes))m" }
+        if minutes > 0 { return "\(minutes)m\(String(format: "%02d", seconds))s" }
+        return "\(seconds)s"
     }
 
     private func updateCountdown() {
@@ -1208,6 +1248,19 @@ class UsageManager: ObservableObject {
             }
         }
         if timeUntilReset != newValue { timeUntilReset = newValue }
+
+        // Update per-quota timers for fullDashboard mode
+        if menuBarDisplayMode == .fullDashboard {
+            let sessionValue = sessionQuota?.resetsAt
+                .map { max(0, $0.timeIntervalSinceNow) }
+                .map(Self.compactTimeString) ?? "—"
+            if timeUntilSessionReset != sessionValue { timeUntilSessionReset = sessionValue }
+
+            let weeklyValue = weeklyQuota?.resetsAt
+                .map { max(0, $0.timeIntervalSinceNow) }
+                .map(Self.compactTimeString) ?? "—"
+            if timeUntilWeeklyReset != weeklyValue { timeUntilWeeklyReset = weeklyValue }
+        }
     }
 
     // MARK: - Auto-refresh

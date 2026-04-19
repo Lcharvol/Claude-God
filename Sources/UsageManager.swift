@@ -698,6 +698,8 @@ class UsageManager: ObservableObject {
         auth.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self else { return }
+                // Don't re-enter refresh loop while token is expired — causes rapid flicker
+                guard !self.auth.tokenExpired else { return }
                 if self.isAuthenticated && !self.isLoading && (self.quotas.isEmpty || self.errorMessage != nil) {
                     self.showSettings = false
                     self.refresh()

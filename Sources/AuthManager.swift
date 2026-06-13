@@ -398,24 +398,8 @@ class AuthManager: ObservableObject {
                   service.hasPrefix(prefix) else { continue }
             let account = item[kSecAttrAccount as String] as? String ?? ""
 
-            var fetchQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecReturnData as String: true,
-                kSecMatchLimit as String: kSecMatchLimitOne
-            ]
-            if !account.isEmpty {
-                fetchQuery[kSecAttrAccount as String] = account
-            }
-
-            var dataRaw: CFTypeRef?
-            guard SecItemCopyMatching(fetchQuery as CFDictionary, &dataRaw) == errSecSuccess,
-                  let data = dataRaw as? Data,
-                  let trimmed = String(data: data, encoding: .utf8)?
-                      .trimmingCharacters(in: .whitespacesAndNewlines),
-                  !trimmed.isEmpty,
-                  let jsonData = trimmed.data(using: .utf8),
-                  let json = (try? JSONSerialization.jsonObject(with: jsonData)) as? [String: Any],
+            // ponytail: use CLI (no-prompt) instead of SecItemCopyMatching+kSecReturnData (prompts)
+            guard let json = readKeychainViaSecurityCLI(service: service, account: account.isEmpty ? nil : account),
                   let oauth = json["claudeAiOauth"] as? [String: Any],
                   let token = oauth["accessToken"] as? String, !token.isEmpty
             else { continue }

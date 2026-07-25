@@ -123,9 +123,12 @@ struct MenuBarView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
         }
-        // Width grows with the text scale so larger type doesn't wrap or truncate
+        // Width grows with the text scale so larger type doesn't wrap or truncate.
+        // It never shrinks below the base width: Settings holds fixed-width controls
+        // (pickers, ring preview) whose minimum exceeds a narrowed window, and the
+        // overflow gets clipped on both edges.
         .frame(width: (manager.compactMode && !manager.showSettings && manager.selectedTab == .usage ? 300 : 400)
-                      * manager.textScale.rawValue,
+                      * max(manager.textScale.rawValue, 1.0),
                height: manager.windowHeight)
         .environment(\.textScale, manager.textScale.rawValue)
         .background(WindowTopAnchor(height: manager.windowHeight))
@@ -596,7 +599,7 @@ struct MenuBarView: View {
                         .pickerStyle(.segmented)
                         .labelsHidden()
                         .controlSize(.small)
-                        .frame(width: 150)
+                        .frame(width: 150 * manager.textScale.rawValue)
                     }
 
                     SHDivider()

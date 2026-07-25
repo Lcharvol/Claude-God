@@ -6,6 +6,37 @@ import AppKit
 
 // MARK: - Design tokens
 
+/// Multiplier applied to every font size in the popover (see `TextScale`).
+struct TextScaleKey: EnvironmentKey {
+    static let defaultValue: Double = 1.0
+}
+
+extension EnvironmentValues {
+    var textScale: Double {
+        get { self[TextScaleKey.self] }
+        set { self[TextScaleKey.self] = newValue }
+    }
+}
+
+struct ScaledFont: ViewModifier {
+    @Environment(\.textScale) private var scale
+    let size: CGFloat
+    let weight: Font.Weight
+    let design: Font.Design
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size * scale, weight: weight, design: design))
+    }
+}
+
+extension View {
+    /// `.font(.system(size:weight:design:))` scaled by the user's text-size preference.
+    /// Every popover font goes through this so one setting resizes the whole UI.
+    func shFont(_ size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> some View {
+        modifier(ScaledFont(size: size, weight: weight, design: design))
+    }
+}
+
 private enum Theme {
     static let radius: CGFloat = 8
     static let border = Color.primary.opacity(0.08)
@@ -92,8 +123,11 @@ struct MenuBarView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
         }
-        .frame(width: manager.compactMode && !manager.showSettings && manager.selectedTab == .usage ? 300 : 400,
+        // Width grows with the text scale so larger type doesn't wrap or truncate
+        .frame(width: (manager.compactMode && !manager.showSettings && manager.selectedTab == .usage ? 300 : 400)
+                      * manager.textScale.rawValue,
                height: manager.windowHeight)
+        .environment(\.textScale, manager.textScale.rawValue)
         .background(WindowTopAnchor(height: manager.windowHeight))
         .animation(.easeOut(duration: 0.15), value: manager.selectedTab)
         .animation(.easeOut(duration: 0.15), value: manager.showSettings)
@@ -113,14 +147,14 @@ struct MenuBarView: View {
                 .frame(width: 26, height: 26)
                 .overlay(
                     Text("C")
-                        .font(.system(size: 13, weight: .heavy))
+                        .shFont(13, weight: .heavy)
                         .foregroundColor(.white)
                 )
 
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 5) {
                     Text("Claude God")
-                        .font(.system(size: 13, weight: .semibold))
+                        .shFont(13, weight: .semibold)
                     if manager.isSessionActive {
                         Circle()
                             .fill(.green)
@@ -135,7 +169,7 @@ struct MenuBarView: View {
                 }
                 if !manager.subscriptionType.isEmpty {
                     Text(manager.subscriptionType.capitalized)
-                        .font(.system(size: 11, weight: .medium))
+                        .shFont(11, weight: .medium)
                         .foregroundColor(.secondary)
                 }
             }
@@ -144,7 +178,7 @@ struct MenuBarView: View {
 
             if let lastRefresh = manager.lastRefresh, !manager.showSettings && manager.selectedTab == .usage {
                 Text(lastRefresh.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .shFont(11, weight: .medium, design: .monospaced)
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
@@ -209,14 +243,14 @@ struct MenuBarView: View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
                 Image(systemName: "arrow.down.circle")
-                    .font(.system(size: 14, weight: .medium))
+                    .shFont(14, weight: .medium)
                     .foregroundColor(Theme.accent)
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Update available")
-                        .font(.system(size: 11, weight: .medium))
+                        .shFont(11, weight: .medium)
                     Text("v\(UpdateChecker.currentVersion) → v\(manager.latestVersion)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .shFont(11, weight: .medium, design: .monospaced)
                         .foregroundColor(.secondary)
                 }
 
@@ -238,9 +272,9 @@ struct MenuBarView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: copiedBrewCommand ? "checkmark" : "doc.on.clipboard")
-                        .font(.system(size: 10))
+                        .shFont(10)
                     Text(copiedBrewCommand ? "Copied!" : "brew upgrade claude-god")
-                        .font(.system(size: 11, design: .monospaced))
+                        .shFont(11, design: .monospaced)
                 }
                 .foregroundColor(copiedBrewCommand ? .green : .secondary)
                 .frame(maxWidth: .infinity)
@@ -276,7 +310,7 @@ struct MenuBarView: View {
                             SHBadge(text: "Connected", color: .green)
                             Spacer()
                             Text(manager.credentialSource.rawValue)
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .shFont(11, weight: .medium, design: .monospaced)
                                 .foregroundColor(.secondary)
                         }
                     } else {
@@ -320,7 +354,7 @@ struct MenuBarView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     SHLabel("Notifications")
                     Toggle("Alert when usage is high", isOn: $manager.notificationsEnabled)
-                        .font(.system(size: 12))
+                        .shFont(12)
                         .toggleStyle(.switch)
                         .controlSize(.small)
 
@@ -328,13 +362,13 @@ struct MenuBarView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 6) {
                                 Text("Alert at")
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                     .foregroundColor(.secondary)
                                 Text("\(Int(100 - manager.notificationThreshold))% used")
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .shFont(11, weight: .semibold, design: .monospaced)
                                 Spacer()
                                 Text("(\(Int(manager.notificationThreshold))% left)")
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .shFont(11, design: .monospaced)
                                     .foregroundColor(.secondary)
                             }
                             Slider(value: $manager.notificationThreshold, in: 5...50, step: 5)
@@ -350,17 +384,17 @@ struct MenuBarView: View {
                     SHLabel("Daily budget")
                     HStack(spacing: 8) {
                         Text("$")
-                            .font(.system(size: 12, weight: .medium))
+                            .shFont(12, weight: .medium)
                             .foregroundColor(.secondary)
                         TextField("Not set", value: Binding(
                             get: { manager.dailyBudget > 0 ? manager.dailyBudget : nil },
                             set: { manager.dailyBudget = $0 ?? 0 }
                         ), format: .number.precision(.fractionLength(0...2)))
-                            .font(.system(size: 12, design: .monospaced))
+                            .shFont(12, design: .monospaced)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 70)
                         Text("/ day")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                         Spacer()
                         if manager.dailyBudget > 0 {
@@ -371,7 +405,7 @@ struct MenuBarView: View {
                     }
                     if manager.dailyBudget > 0 {
                         Text("Get notified when daily spend approaches your budget")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -390,7 +424,7 @@ struct MenuBarView: View {
                     .pickerStyle(.segmented)
 
                     Text(manager.menuBarDisplayMode.description)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .shFont(11, weight: .medium, design: .monospaced)
                         .foregroundColor(.secondary)
                 }
             }
@@ -401,7 +435,7 @@ struct MenuBarView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         SHLabel("Icon+ Rings")
                         Text("Choose up to 3 quotas to display as concentric activity rings.")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
 
                         let quotaOptions: [String] = manager.ringQuotaOptions.map(\.label)
@@ -412,7 +446,7 @@ struct MenuBarView: View {
                                     .fill(MenuBarRingView.ringColors[i])
                                     .frame(width: 8, height: 8)
                                 Text("Ring \(i + 1)")
-                                    .font(.system(size: 11, weight: .medium))
+                                    .shFont(11, weight: .medium)
                                     .frame(width: 44, alignment: .leading)
                                 Spacer()
                                 let slotBinding = Binding<String>(
@@ -471,23 +505,23 @@ struct MenuBarView: View {
                     }
                     if manager.customAlertRules.isEmpty {
                         Text("No custom alerts. Add one to get notified at specific quota thresholds.")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                     } else {
                         ForEach(Array(manager.customAlertRules.enumerated()), id: \.element.id) { index, rule in
                             HStack(spacing: 6) {
                                 Text(rule.quotaLabel)
-                                    .font(.system(size: 11, weight: .medium))
+                                    .shFont(11, weight: .medium)
                                     .lineLimit(1)
                                 Spacer()
                                 Text("at \(Int(rule.threshold))%")
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .shFont(11, design: .monospaced)
                                     .foregroundColor(.secondary)
                                 Button {
                                     manager.customAlertRules.remove(at: index)
                                 } label: {
                                     Image(systemName: "xmark")
-                                        .font(.system(size: 11, weight: .bold))
+                                        .shFont(11, weight: .bold)
                                         .foregroundColor(.secondary)
                                 }
                                 .buttonStyle(.plain)
@@ -510,7 +544,7 @@ struct MenuBarView: View {
                     }
                     if manager.accounts.isEmpty {
                         Text("Using default credentials. Add accounts to switch between profiles.")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                     } else {
                         ForEach(Array(manager.accounts.enumerated()), id: \.element.id) { index, account in
@@ -519,7 +553,7 @@ struct MenuBarView: View {
                                     .fill(index == manager.activeAccountIndex ? Color.green : Theme.border)
                                     .frame(width: 6, height: 6)
                                 Text(account.label)
-                                    .font(.system(size: 11, weight: index == manager.activeAccountIndex ? .semibold : .regular))
+                                    .shFont(11, weight: index == manager.activeAccountIndex ? .semibold : .regular)
                                 Spacer()
                                 if index != manager.activeAccountIndex {
                                     SHButton(label: "Switch", style: .ghost) {
@@ -530,7 +564,7 @@ struct MenuBarView: View {
                                     manager.removeAccount(at: index)
                                 } label: {
                                     Image(systemName: "xmark")
-                                        .font(.system(size: 11, weight: .bold))
+                                        .shFont(11, weight: .bold)
                                         .foregroundColor(.secondary)
                                 }
                                 .buttonStyle(.plain)
@@ -545,23 +579,39 @@ struct MenuBarView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     SHLabel("Preferences")
                     Toggle("Compact mode", isOn: $manager.compactMode)
-                        .font(.system(size: 12))
+                        .shFont(12)
                         .toggleStyle(.switch)
                         .controlSize(.small)
 
                     SHDivider()
+                    HStack {
+                        Text("Text size")
+                            .shFont(12)
+                        Spacer()
+                        Picker("", selection: $manager.textScale) {
+                            ForEach(TextScale.allCases) { scale in
+                                Text(scale.label).tag(scale)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .controlSize(.small)
+                        .frame(width: 150)
+                    }
+
+                    SHDivider()
                     Toggle("Launch at login", isOn: $manager.launchAtLogin)
-                        .font(.system(size: 12))
+                        .shFont(12)
                         .toggleStyle(.switch)
                         .controlSize(.small)
                     SHDivider()
                     Toggle("Auto-reconnect when session expires", isOn: $manager.autoReconnect)
-                        .font(.system(size: 12))
+                        .shFont(12)
                         .toggleStyle(.switch)
                         .controlSize(.small)
                     if manager.autoReconnect {
                         Text("Automatically opens browser sign-in when your token expires.")
-                            .font(.system(size: 10))
+                            .shFont(10)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -584,7 +634,7 @@ struct MenuBarView: View {
                     SHLabel("About")
                     HStack(spacing: 8) {
                         Text("Claude God v\(UpdateChecker.currentVersion)")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                         Spacer()
                         SHButton(label: "GitHub", icon: "link", style: .outline) {
@@ -595,7 +645,7 @@ struct MenuBarView: View {
                     }
                     HStack(spacing: 8) {
                         Text("Free & open source")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                         Spacer()
                         SHButton(label: "Report issue", icon: "exclamationmark.bubble", style: .ghost) {
@@ -612,16 +662,16 @@ struct MenuBarView: View {
                     }
                     HStack(spacing: 8) {
                         Text("⌥⌘C Toggle · ⌘R Refresh · ⌘1 Usage · ⌘2 Analytics · ⌘3 Timeline · ⌘4 ROI")
-                            .font(.system(size: 11, design: .monospaced))
+                            .shFont(11, design: .monospaced)
                             .foregroundColor(.secondary.opacity(0.6))
                     }
                     if !HotkeyManager.shared.isRegistered {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.orange)
                             Text("⌥⌘C hotkey failed to register")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.orange)
                         }
                     }
@@ -640,14 +690,14 @@ struct MenuBarView: View {
                         HStack {
                             HStack(spacing: 5) {
                                 Image(systemName: quota.icon)
-                                    .font(.system(size: 11, weight: .medium))
+                                    .shFont(11, weight: .medium)
                                     .foregroundColor(.secondary)
                                 Text(quota.label)
-                                    .font(.system(size: 12, weight: .medium))
+                                    .shFont(12, weight: .medium)
                             }
                             Spacer()
                             Text(formatUtilization(quota.utilization))
-                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .shFont(13, weight: .bold, design: .monospaced)
                                 .foregroundColor(quota.level.color)
                         }
                         .accessibilityElement(children: .combine)
@@ -669,7 +719,7 @@ struct MenuBarView: View {
 
                         if let resetsAt = quota.resetsAt, resetsAt.timeIntervalSinceNow > 0 {
                             Text("Resets \(relativeResetTime(resetsAt))")
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .shFont(11, weight: .medium, design: .monospaced)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -679,14 +729,14 @@ struct MenuBarView: View {
             // Peak / Off-peak indicator
             HStack(spacing: 6) {
                 Image(systemName: manager.isPeakHours ? "sun.max.fill" : "moon.stars.fill")
-                    .font(.system(size: 11, weight: .medium))
+                    .shFont(11, weight: .medium)
                     .foregroundColor(manager.isPeakHours ? .orange : .indigo)
                 Text(manager.isPeakHours ? "Peak hours" : "Off-peak")
-                    .font(.system(size: 11, weight: .medium))
+                    .shFont(11, weight: .medium)
                     .foregroundColor(manager.isPeakHours ? .orange : .indigo)
                 Spacer()
                 Text(manager.peakTransitionDescription)
-                    .font(.system(size: 11, design: .monospaced))
+                    .shFont(11, design: .monospaced)
                     .foregroundColor(.secondary)
             }
             .padding(.horizontal, 10)
@@ -708,14 +758,14 @@ struct MenuBarView: View {
                         .fill(.green)
                         .frame(width: 6, height: 6)
                     Text("Active session")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text("\(manager.activeSessionMessages) msgs")
-                        .font(.system(size: 11, design: .monospaced))
+                        .shFont(11, design: .monospaced)
                         .foregroundColor(.secondary)
                     Text(formatCost(manager.activeSessionCost))
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .shFont(12, weight: .semibold, design: .monospaced)
                         .foregroundColor(.green)
                         .contentTransition(.numericText())
                 }
@@ -735,14 +785,14 @@ struct MenuBarView: View {
             if let prediction = manager.burnRatePrediction {
                 HStack(spacing: 6) {
                     Image(systemName: "gauge.with.needle")
-                        .font(.system(size: 11, weight: .medium))
+                        .shFont(11, weight: .medium)
                         .foregroundColor(.orange)
                     Text("At this rate, limit in")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(prediction)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .shFont(12, weight: .semibold, design: .monospaced)
                         .foregroundColor(.orange)
                 }
                 .padding(.horizontal, 10)
@@ -761,14 +811,14 @@ struct MenuBarView: View {
             if let forecast = manager.monthlyForecast {
                 HStack(spacing: 6) {
                     Image(systemName: "chart.line.uptrend.xyaxis")
-                        .font(.system(size: 11, weight: .medium))
+                        .shFont(11, weight: .medium)
                         .foregroundColor(.blue)
                     Text("Projected this month")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(formatCost(forecast.projected))
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .shFont(12, weight: .semibold, design: .monospaced)
                         .foregroundColor(.blue)
                 }
                 .padding(.horizontal, 10)
@@ -787,10 +837,10 @@ struct MenuBarView: View {
             if let tip = manager.modelAdvisorTip {
                 HStack(spacing: 6) {
                     Image(systemName: "lightbulb.fill")
-                        .font(.system(size: 11, weight: .medium))
+                        .shFont(11, weight: .medium)
                         .foregroundColor(.yellow)
                     Text(tip)
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 10)
@@ -810,14 +860,14 @@ struct MenuBarView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
                         Image(systemName: "plusminus.circle.fill")
-                            .font(.system(size: 11, weight: .medium))
+                            .shFont(11, weight: .medium)
                             .foregroundColor(extra.isEnabled ? .green : .secondary)
                         Text("Extra usage")
-                            .font(.system(size: 11, weight: .medium))
+                            .shFont(11, weight: .medium)
                         Spacer()
                         if let util = extra.utilization {
                             Text(formatUtilization(util))
-                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .shFont(13, weight: .bold, design: .monospaced)
                                 .foregroundColor(UsageLevel(utilization: util).color)
                         } else {
                             SHBadge(text: extra.isEnabled ? "On" : "Off",
@@ -844,19 +894,19 @@ struct MenuBarView: View {
 
                     HStack {
                         Text("Spent this month")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(extra.usedFormatted + (extra.currency.map { " \($0)" } ?? ""))
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .shFont(11, weight: .semibold, design: .monospaced)
                     }
                     HStack {
                         Text("Monthly limit")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                         Spacer()
                         Text(extra.limitFormatted)
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .shFont(11, weight: .semibold, design: .monospaced)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -874,14 +924,14 @@ struct MenuBarView: View {
             // Reset timer
             HStack(spacing: 6) {
                 Image(systemName: "clock")
-                    .font(.system(size: 11, weight: .medium))
+                    .shFont(11, weight: .medium)
                     .foregroundColor(.secondary)
                 Text("Next reset")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(manager.timeUntilReset)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .shFont(12, weight: .semibold, design: .monospaced)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -901,7 +951,7 @@ struct MenuBarView: View {
             ForEach(manager.quotas) { quota in
                 HStack(spacing: 6) {
                     Text(quota.label)
-                        .font(.system(size: 11, weight: .medium))
+                        .shFont(11, weight: .medium)
                         .foregroundColor(.secondary)
                     Spacer()
 
@@ -916,7 +966,7 @@ struct MenuBarView: View {
                     .accessibilityHidden(true)
 
                     Text(formatUtilization(quota.utilization))
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .shFont(11, weight: .bold, design: .monospaced)
                         .foregroundColor(quota.level.color)
                         .frame(width: 38, alignment: .trailing)
                 }
@@ -929,11 +979,11 @@ struct MenuBarView: View {
                 SHDivider().padding(.vertical, 2)
                 HStack {
                     Text("Limit in")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.orange)
                     Spacer()
                     Text(prediction)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .shFont(11, weight: .semibold, design: .monospaced)
                         .foregroundColor(.orange)
                 }
             }
@@ -942,24 +992,24 @@ struct MenuBarView: View {
 
             HStack {
                 Text("Next reset")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(manager.timeUntilReset)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .shFont(11, weight: .semibold, design: .monospaced)
                     .foregroundColor(.secondary)
             }
 
             HStack {
                 Image(systemName: manager.isPeakHours ? "sun.max.fill" : "moon.stars.fill")
-                    .font(.system(size: 10))
+                    .shFont(10)
                     .foregroundColor(manager.isPeakHours ? .orange : .indigo)
                 Text(manager.isPeakHours ? "Peak" : "Off-peak")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(manager.isPeakHours ? .orange : .indigo)
                 Spacer()
                 Text(manager.peakTransitionDescription)
-                    .font(.system(size: 11, design: .monospaced))
+                    .shFont(11, design: .monospaced)
                     .foregroundColor(.secondary)
             }
             .help("Peak hours: \(UsageManager.peakHoursDescription)")
@@ -967,11 +1017,11 @@ struct MenuBarView: View {
             if let lastRefresh = manager.lastRefresh {
                 HStack {
                     Text("Updated")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(lastRefresh.formatted(date: .omitted, time: .shortened))
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .shFont(11, weight: .medium, design: .monospaced)
                         .foregroundColor(.secondary)
                 }
             }
@@ -985,13 +1035,13 @@ struct MenuBarView: View {
             if manager.monthStats.totalMessages == 0 {
                 VStack(spacing: 10) {
                     Image(systemName: "chart.bar")
-                        .font(.system(size: 24, weight: .medium))
+                        .shFont(24, weight: .medium)
                         .foregroundColor(.secondary.opacity(0.5))
                     Text("No session data found")
-                        .font(.system(size: 12, weight: .medium))
+                        .shFont(12, weight: .medium)
                         .foregroundColor(.secondary)
                     Text("Analytics appear after using Claude Code.\nData is read from ~/.claude/projects/")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary.opacity(0.7))
                         .multilineTextAlignment(.center)
                 }
@@ -1017,7 +1067,7 @@ struct MenuBarView: View {
                                 SHLabel("Daily Budget")
                                 Spacer()
                                 Text("\(formatCost(manager.todayStats.totalCost)) / $\(String(format: "%.0f", manager.dailyBudget))")
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .shFont(11, weight: .semibold, design: .monospaced)
                                     .foregroundColor(budgetUtil >= 100 ? .red : budgetUtil >= 80 ? .orange : .secondary)
                             }
                             GeometryReader { geo in
@@ -1042,7 +1092,7 @@ struct MenuBarView: View {
                                 SHLabel("Usage Trend")
                                 Spacer()
                                 Text("\(dailyRange) days")
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                     .foregroundColor(.secondary)
                             }
                             SparklineView(
@@ -1065,14 +1115,14 @@ struct MenuBarView: View {
                                         .fill(colorForModel(model.model))
                                         .frame(width: 6, height: 6)
                                     Text(model.shortName)
-                                        .font(.system(size: 11, weight: .medium))
+                                        .shFont(11, weight: .medium)
                                         .frame(width: 50, alignment: .leading)
                                     Spacer()
                                     Text(formatTokens(model.tokens.totalTokens))
-                                        .font(.system(size: 11, design: .monospaced))
+                                        .shFont(11, design: .monospaced)
                                         .foregroundColor(.secondary)
                                     Text(formatCostCompact(model.cost))
-                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .shFont(11, weight: .semibold, design: .monospaced)
                                         .frame(width: 64, alignment: .trailing)
                                         .lineLimit(1)
                                 }
@@ -1080,14 +1130,14 @@ struct MenuBarView: View {
                             SHDivider()
                             HStack(spacing: 6) {
                                 Text("Total")
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .shFont(11, weight: .semibold)
                                     .frame(width: 56, alignment: .leading)
                                 Spacer()
                                 Text(formatTokens(manager.monthStats.totalTokens.totalTokens))
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .shFont(11, design: .monospaced)
                                     .foregroundColor(.secondary)
                                 Text(formatCostCompact(manager.monthStats.totalCost))
-                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .shFont(11, weight: .bold, design: .monospaced)
                                     .frame(width: 64, alignment: .trailing)
                                     .lineLimit(1)
                             }
@@ -1104,17 +1154,17 @@ struct MenuBarView: View {
                                 VStack(spacing: 3) {
                                     HStack(spacing: 6) {
                                         Image(systemName: "folder.fill")
-                                            .font(.system(size: 11, weight: .medium))
+                                            .shFont(11, weight: .medium)
                                             .foregroundColor(Theme.accent.opacity(0.6))
                                         Text(project.projectName)
-                                            .font(.system(size: 11, weight: .medium))
+                                            .shFont(11, weight: .medium)
                                             .lineLimit(1)
                                         Spacer()
                                         Text("\(project.totalMessages) msgs")
-                                            .font(.system(size: 11, design: .monospaced))
+                                            .shFont(11, design: .monospaced)
                                             .foregroundColor(.secondary)
                                         Text(formatCostCompact(project.totalCost))
-                                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                            .shFont(11, weight: .semibold, design: .monospaced)
                                             .lineLimit(1)
                                             .fixedSize()
                                     }
@@ -1150,19 +1200,19 @@ struct MenuBarView: View {
                     SHCard {
                         HStack(spacing: 8) {
                             Image(systemName: "chart.line.uptrend.xyaxis")
-                                .font(.system(size: 12))
+                                .shFont(12)
                                 .foregroundColor(.blue)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Monthly Forecast")
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .shFont(11, weight: .semibold)
                                     .foregroundColor(.primary.opacity(0.7))
                                 Text("\(forecast.daysRemaining) days remaining")
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                     .foregroundColor(.secondary)
                             }
                             Spacer()
                             Text(formatCost(forecast.projected))
-                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .shFont(14, weight: .bold, design: .monospaced)
                                 .foregroundColor(.blue)
                         }
                     }
@@ -1184,20 +1234,20 @@ struct MenuBarView: View {
                                             manager.toggleStar(sessionID: session.id)
                                         } label: {
                                             Image(systemName: manager.annotation(for: session.id).starred ? "star.fill" : "star")
-                                                .font(.system(size: 11))
+                                                .shFont(11)
                                                 .foregroundColor(manager.annotation(for: session.id).starred ? .yellow : .secondary.opacity(0.4))
                                         }
                                         .buttonStyle(.plain)
 
                                         Text(session.topic)
-                                            .font(.system(size: 11, weight: .medium))
+                                            .shFont(11, weight: .medium)
                                             .lineLimit(1)
                                         Spacer()
 
                                         // Tag
                                         if !manager.annotation(for: session.id).tag.isEmpty {
                                             Text(manager.annotation(for: session.id).tag)
-                                                .font(.system(size: 11, weight: .medium))
+                                                .shFont(11, weight: .medium)
                                                 .foregroundColor(Theme.accent)
                                                 .padding(.horizontal, 4)
                                                 .padding(.vertical, 1)
@@ -1207,30 +1257,30 @@ struct MenuBarView: View {
                                         }
 
                                         Text(formatCost(session.cost))
-                                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                            .shFont(11, weight: .semibold, design: .monospaced)
                                     }
                                     HStack(spacing: 6) {
                                         Text(session.projectName)
-                                            .font(.system(size: 11))
+                                            .shFont(11)
                                             .foregroundColor(Theme.accent.opacity(0.7))
                                         Text("·")
                                             .foregroundColor(.secondary.opacity(0.5))
                                         Text(session.primaryModel)
-                                            .font(.system(size: 11))
+                                            .shFont(11)
                                             .foregroundColor(.secondary)
                                         Text("·")
                                             .foregroundColor(.secondary.opacity(0.5))
                                         Text(session.durationLabel)
-                                            .font(.system(size: 11))
+                                            .shFont(11)
                                             .foregroundColor(.secondary)
                                         Text("·")
                                             .foregroundColor(.secondary.opacity(0.5))
                                         Text(session.timeLabel)
-                                            .font(.system(size: 11))
+                                            .shFont(11)
                                             .foregroundColor(.secondary)
                                         Spacer()
                                         Text("\(session.messageCount) msgs")
-                                            .font(.system(size: 11))
+                                            .shFont(11)
                                             .foregroundColor(.secondary)
                                     }
                                 }
@@ -1262,7 +1312,7 @@ struct MenuBarView: View {
                             ForEach(manager.monthStats.daily.prefix(dailyRange)) { day in
                                 HStack(spacing: 6) {
                                     Text(day.dateLabel)
-                                        .font(.system(size: 11, weight: .medium))
+                                        .shFont(11, weight: .medium)
                                         .foregroundColor(.secondary)
                                         .frame(width: 60, alignment: .leading)
 
@@ -1278,7 +1328,7 @@ struct MenuBarView: View {
                                     .frame(height: 5)
 
                                     Text(formatCost(day.cost))
-                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .shFont(11, weight: .semibold, design: .monospaced)
                                         .frame(width: 46, alignment: .trailing)
                                 }
                                 .help("\(day.dateLabel): \(formatCost(day.cost)) · \(day.messageCount) msgs · \(formatTokens(day.tokens.totalTokens)) tokens")
@@ -1341,29 +1391,29 @@ struct MenuBarView: View {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("This week")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                             Text(formatCost(comp.thisWeekCost))
-                                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                .shFont(13, weight: .bold, design: .monospaced)
                         }
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Last week")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                             Text(formatCost(comp.lastWeekCost))
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                .shFont(13, weight: .medium, design: .monospaced)
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
                             Text("Delta")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                             HStack(spacing: 2) {
                                 Image(systemName: comp.costDelta >= 0 ? "arrow.up.right" : "arrow.down.right")
-                                    .font(.system(size: 11, weight: .bold))
+                                    .shFont(11, weight: .bold)
                                 Text("\(String(format: "%.0f", abs(comp.costDeltaPercent)))%")
-                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .shFont(12, weight: .bold, design: .monospaced)
                             }
                             .foregroundColor(comp.costDelta >= 0 ? .orange : .green)
                         }
@@ -1371,11 +1421,11 @@ struct MenuBarView: View {
                     // Message delta
                     HStack(spacing: 4) {
                         Text("\(comp.thisWeekMessages) msgs this week")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                         if comp.messageDelta != 0 {
                             Text("(\(comp.messageDelta > 0 ? "+" : "")\(comp.messageDelta))")
-                                .font(.system(size: 11, weight: .medium))
+                                .shFont(11, weight: .medium)
                                 .foregroundColor(comp.messageDelta > 0 ? .orange : .green)
                         }
                     }
@@ -1396,9 +1446,9 @@ struct MenuBarView: View {
                     HStack(spacing: 0) {
                         VStack(spacing: 2) {
                             Text(eff.costPerMessage >= 0.01 ? String(format: "$%.2f", eff.costPerMessage) : String(format: "$%.3f", eff.costPerMessage))
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .shFont(11, weight: .bold, design: .monospaced)
                             Text("$/msg")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                         .frame(maxWidth: .infinity)
@@ -1409,9 +1459,9 @@ struct MenuBarView: View {
                             let totalDuration = manager.sessionHistory.reduce(0.0) { $0 + $1.duration }
                             let costPerMin = totalDuration > 60 ? manager.monthStats.totalCost / (totalDuration / 60) : 0
                             Text(costPerMin >= 0.01 ? String(format: "$%.2f", costPerMin) : String(format: "$%.3f", costPerMin))
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .shFont(11, weight: .bold, design: .monospaced)
                             Text("$/min")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                         .frame(maxWidth: .infinity)
@@ -1420,9 +1470,9 @@ struct MenuBarView: View {
 
                         VStack(spacing: 2) {
                             Text(String(format: "%.0f%%", eff.cacheHitRate))
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .shFont(11, weight: .bold, design: .monospaced)
                             Text("cache hit")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                         .frame(maxWidth: .infinity)
@@ -1431,9 +1481,9 @@ struct MenuBarView: View {
                     if abs(eff.costPerMessageTrend) > 0.001 {
                         HStack(spacing: 4) {
                             Image(systemName: eff.costPerMessageTrend > 0 ? "arrow.up.right" : "arrow.down.right")
-                                .font(.system(size: 11, weight: .bold))
+                                .shFont(11, weight: .bold)
                             Text("Cost/msg \(eff.costPerMessageTrend > 0 ? "increasing" : "decreasing")")
-                                .font(.system(size: 11))
+                                .shFont(11)
                         }
                         .foregroundColor(eff.costPerMessageTrend > 0 ? .orange : .green)
                     }
@@ -1485,7 +1535,7 @@ struct MenuBarView: View {
             HStack {
                 Button(action: { manager.timelineGoToPreviousDay() }) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
+                        .shFont(11, weight: .semibold)
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(Color.secondary)
@@ -1493,13 +1543,13 @@ struct MenuBarView: View {
                 Spacer()
 
                 Text(Self.timelineDateFormatter.string(from: manager.timelineDate))
-                    .font(.system(size: 12, weight: .semibold))
+                    .shFont(12, weight: .semibold)
 
                 Spacer()
 
                 Button(action: { manager.timelineGoToNextDay() }) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .shFont(11, weight: .semibold)
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(Calendar.current.isDateInToday(manager.timelineDate) ? Theme.muted : Color.secondary)
@@ -1528,17 +1578,17 @@ struct MenuBarView: View {
                 VStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Loading sessions...")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                 }
                 .padding(.top, 20)
             } else if manager.timelineSessions.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "clock")
-                        .font(.system(size: 24, weight: .medium))
+                        .shFont(24, weight: .medium)
                         .foregroundColor(.secondary.opacity(0.5))
                     Text("No sessions this day")
-                        .font(.system(size: 12, weight: .medium))
+                        .shFont(12, weight: .medium)
                         .foregroundColor(.secondary)
                 }
                 .padding(.top, 20)
@@ -1554,9 +1604,9 @@ struct MenuBarView: View {
     private func timelineStat(label: String, value: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .shFont(13, weight: .bold, design: .monospaced)
             Text(label)
-                .font(.system(size: 11, weight: .medium))
+                .shFont(11, weight: .medium)
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
@@ -1590,16 +1640,16 @@ struct MenuBarView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 4) {
                                 Text(session.timeRangeLabel)
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .shFont(11, weight: .semibold, design: .monospaced)
                                 Text("·")
                                     .foregroundColor(.secondary)
                                 Text(session.durationLabel)
-                                    .font(.system(size: 11, weight: .medium))
+                                    .shFont(11, weight: .medium)
                                     .foregroundColor(.secondary)
                             }
 
                             Text(session.projectName)
-                                .font(.system(size: 11, weight: .semibold))
+                                .shFont(11, weight: .semibold)
                                 .foregroundColor(projColor)
                         }
 
@@ -1607,28 +1657,28 @@ struct MenuBarView: View {
 
                         VStack(alignment: .trailing, spacing: 2) {
                             Text("$\(String(format: "%.3f", session.cost))")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .shFont(11, weight: .bold, design: .monospaced)
                             HStack(spacing: 3) {
                                 Text("\(session.messageCount) msgs")
-                                    .font(.system(size: 11, weight: .medium))
+                                    .shFont(11, weight: .medium)
                                     .foregroundColor(.secondary)
                                 Text("·")
                                     .foregroundColor(.secondary)
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                 Text(session.primaryModel)
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .shFont(11, weight: .semibold)
                                     .foregroundColor(.secondary)
                             }
                         }
 
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
+                            .shFont(11, weight: .semibold)
                             .foregroundColor(.secondary)
                     }
 
                     // Topic
                     Text(session.topic)
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                         .lineLimit(isExpanded ? 3 : 1)
                 }
@@ -1643,13 +1693,13 @@ struct MenuBarView: View {
                     ForEach(Array(session.messages.enumerated()), id: \.element.id) { index, msg in
                         HStack(spacing: 8) {
                             Text(msg.timeLabel)
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .shFont(11, weight: .medium, design: .monospaced)
                                 .foregroundColor(.secondary)
                                 .frame(width: 36, alignment: .leading)
 
                             // Model badge
                             Text(msg.shortModel)
-                                .font(.system(size: 11, weight: .bold))
+                                .shFont(11, weight: .bold)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 2)
                                 .background(
@@ -1659,13 +1709,13 @@ struct MenuBarView: View {
                                 .foregroundColor(modelColor(msg.shortModel))
 
                             Text(msg.topic)
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(Color.secondary)
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
                             Text("$\(String(format: "%.4f", msg.cost))")
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .shFont(11, weight: .medium, design: .monospaced)
                                 .foregroundColor(.secondary)
                         }
                         .padding(.horizontal, 10)
@@ -1705,12 +1755,12 @@ struct MenuBarView: View {
         if !manager.isGitAvailable {
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 24))
+                    .shFont(24)
                     .foregroundColor(.orange)
                 Text("Git not found")
-                    .font(.system(size: 13, weight: .semibold))
+                    .shFont(13, weight: .semibold)
                 Text("Install Git to see your ROI metrics.")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 200)
@@ -1718,23 +1768,23 @@ struct MenuBarView: View {
             VStack(spacing: 8) {
                 ProgressView()
                 Text("Analyzing git history...")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 200)
         } else if manager.roiStats.totalAssistedCommits == 0 {
             VStack(spacing: 12) {
                 Image(systemName: "chart.bar.xaxis")
-                    .font(.system(size: 24))
+                    .shFont(24)
                     .foregroundColor(.secondary)
                 Text("No data yet")
-                    .font(.system(size: 13, weight: .semibold))
+                    .shFont(13, weight: .semibold)
                 Text("Use Claude Code and commit to see your ROI.\nCommits within 2h of a session are tracked.")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                 Button("Refresh") { manager.refreshROI() }
-                    .font(.system(size: 11))
+                    .shFont(11)
             }
             .frame(maxWidth: .infinity, minHeight: 200)
         } else {
@@ -1774,14 +1824,14 @@ struct MenuBarView: View {
                                     .fill(Theme.accent)
                                     .frame(width: 3, height: 20)
                                 Text(project.projectName)
-                                    .font(.system(size: 11, weight: .medium))
+                                    .shFont(11, weight: .medium)
                                     .lineLimit(1)
                                 Spacer()
                                 Text("\(project.assistedCommits)c")
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .shFont(11, design: .monospaced)
                                     .foregroundColor(.secondary)
                                 Text(formatCostCompact(project.costPerCommit) + "/c")
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .shFont(11, weight: .semibold, design: .monospaced)
                                     .fixedSize()
                             }
                         }
@@ -1800,14 +1850,14 @@ struct MenuBarView: View {
                                     .fill(modelColor(entry.model))
                                     .frame(width: 8, height: 8)
                                 Text(entry.model)
-                                    .font(.system(size: 11, weight: .medium))
+                                    .shFont(11, weight: .medium)
                                     .frame(width: 50, alignment: .leading)
                                 Spacer()
                                 Text(formatCostCompact(entry.cost))
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .shFont(11, design: .monospaced)
                                     .foregroundColor(.secondary)
                                 Text(formatCostCompact(entry.avgCostPerCommit) + "/commit")
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .shFont(11, weight: .semibold, design: .monospaced)
                                     .fixedSize()
                             }
                         }
@@ -1852,10 +1902,10 @@ struct MenuBarView: View {
                 let improved = pctChange < 0
                 HStack {
                     Image(systemName: improved ? "arrow.down.right" : "arrow.up.right")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(improved ? .green : .orange)
                     Text("Cost/commit \(improved ? "decreased" : "increased") \(String(format: "%.0f", abs(pctChange)))% this month")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 4)
@@ -1870,7 +1920,7 @@ struct MenuBarView: View {
             ProgressView()
                 .controlSize(.small)
             Text("Loading...")
-                .font(.system(size: 12))
+                .shFont(12)
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
@@ -1886,16 +1936,16 @@ struct MenuBarView: View {
             SHCard {
                 HStack(spacing: 10) {
                     Image(systemName: isAuth ? "key.fill" : isRateLimit ? "clock.fill" : "exclamationmark.triangle")
-                        .font(.system(size: 14, weight: .medium))
+                        .shFont(14, weight: .medium)
                         .foregroundColor(isRateLimit ? .blue : .orange)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(error)
-                            .font(.system(size: 12, weight: .medium))
+                            .shFont(12, weight: .medium)
                         Text(isAuth ? (manager.isAutoReconnecting ? "Waiting for browser sign-in..." : "Session expired") :
                              isNetwork ? "Check your internet connection" :
                              isRateLimit ? "Will auto-retry shortly" :
                              "Try refreshing or check settings")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                     }
                     Spacer()
@@ -1924,10 +1974,10 @@ struct MenuBarView: View {
     private var emptyView: some View {
         VStack(spacing: 8) {
             Image(systemName: "arrow.clockwise")
-                .font(.system(size: 18, weight: .medium))
+                .shFont(18, weight: .medium)
                 .foregroundColor(.secondary)
             Text("Click Refresh to load data")
-                .font(.system(size: 12))
+                .shFont(12)
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
@@ -1947,7 +1997,7 @@ struct MenuBarView: View {
             Spacer()
 
             Text("v\(UpdateChecker.currentVersion)")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .shFont(11, weight: .medium, design: .monospaced)
                 .foregroundColor(.secondary.opacity(0.4))
 
             SHButton(label: "Quit", style: .ghost) {
@@ -1994,7 +2044,7 @@ struct MenuBarView: View {
                         extensionsSection = section
                     } label: {
                         Text(section.rawValue)
-                            .font(.system(size: 11, weight: extensionsSection == section ? .semibold : .regular))
+                            .shFont(11, weight: extensionsSection == section ? .semibold : .regular)
                             .foregroundColor(extensionsSection == section ? .primary : .secondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -2028,9 +2078,9 @@ struct MenuBarView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
+                        .shFont(11, weight: .semibold)
                     Text("Installed")
-                        .font(.system(size: 11))
+                        .shFont(11)
                 }
                 .foregroundColor(Theme.accent)
             }
@@ -2061,7 +2111,7 @@ struct MenuBarView: View {
             VStack(spacing: 8) {
                 ProgressView()
                 Text("Loading memories...")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 200)
@@ -2073,14 +2123,14 @@ struct MenuBarView: View {
     private var memoryInstallView: some View {
         VStack(spacing: 16) {
             Image(systemName: "brain")
-                .font(.system(size: 32))
+                .shFont(32)
                 .foregroundColor(Theme.accent)
 
             Text("claude-mem not installed")
-                .font(.system(size: 13, weight: .semibold))
+                .shFont(13, weight: .semibold)
 
             Text("Install the claude-mem plugin to give Claude persistent memory across sessions.")
-                .font(.system(size: 11))
+                .shFont(11)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
@@ -2089,7 +2139,7 @@ struct MenuBarView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     SHLabel("In Claude Code, run:")
                     Text("/plugin marketplace add thedotmack/claude-mem")
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .shFont(11.5, design: .monospaced)
                         .textSelection(.enabled)
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2098,7 +2148,7 @@ struct MenuBarView: View {
                                 .fill(Color.primary.opacity(0.03))
                         )
                     Text("/plugin install claude-mem")
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .shFont(11.5, design: .monospaced)
                         .textSelection(.enabled)
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2107,7 +2157,7 @@ struct MenuBarView: View {
                                 .fill(Color.primary.opacity(0.03))
                         )
                     Text("Then restart Claude Code.")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                 }
             }
@@ -2123,7 +2173,7 @@ struct MenuBarView: View {
                     Text(manager.memoryManager.isLoading ? "Checking..." : "Check again")
                 }
             }
-            .font(.system(size: 11))
+            .shFont(11)
             .disabled(manager.memoryManager.isLoading)
         }
         .frame(maxWidth: .infinity, minHeight: 200)
@@ -2151,7 +2201,7 @@ struct MenuBarView: View {
                         memorySection = section
                     } label: {
                         Text(section.rawValue)
-                            .font(.system(size: 11, weight: memorySection == section ? .semibold : .regular))
+                            .shFont(11, weight: memorySection == section ? .semibold : .regular)
                             .foregroundColor(memorySection == section ? .primary : .secondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -2185,7 +2235,7 @@ struct MenuBarView: View {
                     }
                 } label: {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                 }
                 .menuStyle(.borderlessButton)
@@ -2199,7 +2249,7 @@ struct MenuBarView: View {
                         ProgressView().controlSize(.small)
                     } else {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -2228,13 +2278,13 @@ struct MenuBarView: View {
         HStack(spacing: 6) {
             HStack(spacing: 4) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
                 TextField("Search memories...", text: Binding(
                     get: { manager.memoryManager.searchText },
                     set: { manager.memoryManager.searchText = $0 }
                 ))
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .textFieldStyle(.plain)
                     .onSubmit { manager.memoryManager.refresh() }
             }
@@ -2265,9 +2315,9 @@ struct MenuBarView: View {
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "folder")
-                            .font(.system(size: 11))
+                            .shFont(11)
                         Text(manager.memoryManager.selectedProject.map(projectDisplayName) ?? "All")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .lineLimit(1)
                     }
                     .padding(.horizontal, 6)
@@ -2294,10 +2344,10 @@ struct MenuBarView: View {
         if manager.memoryManager.memories.isEmpty {
             VStack(spacing: 8) {
                 Image(systemName: "tray")
-                    .font(.system(size: 20))
+                    .shFont(20)
                     .foregroundColor(.secondary)
                 Text("No memories found")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 100)
@@ -2308,7 +2358,7 @@ struct MenuBarView: View {
                 }
                 if manager.memoryManager.memories.count > 30 {
                     Text("\(manager.memoryManager.memories.count - 30) more...")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity)
                 }
@@ -2323,7 +2373,7 @@ struct MenuBarView: View {
                 HStack(spacing: 4) {
                     // Type badge
                     Text(memory.type.uppercased())
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .shFont(11, weight: .bold, design: .monospaced)
                         .foregroundColor(Theme.accent)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -2334,12 +2384,12 @@ struct MenuBarView: View {
 
                     if let title = memory.title {
                         Text(title)
-                            .font(.system(size: 11, weight: .semibold))
+                            .shFont(11, weight: .semibold)
                             .lineLimit(1)
                     }
                     Spacer()
                     Text(memory.createdAt.formatted(date: .abbreviated, time: .omitted))
-                        .font(.system(size: 11, design: .monospaced))
+                        .shFont(11, design: .monospaced)
                         .foregroundColor(.secondary)
 
                     // Context menu actions
@@ -2364,7 +2414,7 @@ struct MenuBarView: View {
                         }
                     } label: {
                         Image(systemName: "ellipsis")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                             .frame(width: 16, height: 16)
                     }
@@ -2375,7 +2425,7 @@ struct MenuBarView: View {
                 // Subtitle
                 if let subtitle = memory.subtitle {
                     Text(subtitle)
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
@@ -2383,12 +2433,12 @@ struct MenuBarView: View {
                 // Narrative or text
                 if let narrative = memory.narrative {
                     Text(narrative)
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                         .lineLimit(2)
                 } else if memory.title == nil {
                     Text(memory.text)
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                         .lineLimit(2)
                 }
@@ -2399,16 +2449,16 @@ struct MenuBarView: View {
                         ForEach(memory.facts.prefix(3), id: \.self) { fact in
                             HStack(alignment: .top, spacing: 4) {
                                 Text("•")
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                     .foregroundColor(Theme.accent)
                                 Text(fact)
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                     .lineLimit(1)
                             }
                         }
                         if memory.facts.count > 3 {
                             Text("+\(memory.facts.count - 3) more")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -2418,14 +2468,14 @@ struct MenuBarView: View {
                 if !memory.allFiles.isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "doc.text")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                         ForEach(memory.allFiles.prefix(3), id: \.self) { file in
                             Button {
                                 openFileInFinder(file)
                             } label: {
                                 Text((file as NSString).lastPathComponent)
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .shFont(11, design: .monospaced)
                                     .foregroundColor(.blue)
                                     .lineLimit(1)
                             }
@@ -2433,7 +2483,7 @@ struct MenuBarView: View {
                         }
                         if memory.allFiles.count > 3 {
                             Text("+\(memory.allFiles.count - 3)")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -2474,10 +2524,10 @@ struct MenuBarView: View {
             if activity.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 20))
+                        .shFont(20)
                         .foregroundColor(.secondary)
                     Text("No activity yet")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 100)
@@ -2500,11 +2550,11 @@ struct MenuBarView: View {
 
                         HStack {
                             Text("30d ago")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                             Spacer()
                             Text("Today")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -2540,9 +2590,9 @@ struct MenuBarView: View {
     private func memoryStatItem(value: String, label: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .shFont(13, weight: .semibold, design: .monospaced)
             Text(label)
-                .font(.system(size: 11))
+                .shFont(11)
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
@@ -2555,10 +2605,10 @@ struct MenuBarView: View {
         if manager.memoryManager.projectSummaries.isEmpty {
             VStack(spacing: 8) {
                 Image(systemName: "folder")
-                    .font(.system(size: 20))
+                    .shFont(20)
                     .foregroundColor(.secondary)
                 Text("No projects found")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 100)
@@ -2577,40 +2627,40 @@ struct MenuBarView: View {
                 // Header
                 HStack {
                     Image(systemName: "folder.fill")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(Theme.accent)
                     Text(summary.displayName)
-                        .font(.system(size: 11, weight: .semibold))
+                        .shFont(11, weight: .semibold)
                     Spacer()
                     Text("\(summary.totalObservations) obs")
-                        .font(.system(size: 11, design: .monospaced))
+                        .shFont(11, design: .monospaced)
                         .foregroundColor(.secondary)
                 }
 
                 // Last active
                 Text("Last active: \(summary.lastActive.formatted(date: .abbreviated, time: .omitted))")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
 
                 // Key facts
                 if !summary.allFacts.isEmpty {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Key facts")
-                            .font(.system(size: 11, weight: .semibold))
+                            .shFont(11, weight: .semibold)
                             .foregroundColor(.secondary)
                         ForEach(summary.allFacts.prefix(5), id: \.self) { fact in
                             HStack(alignment: .top, spacing: 4) {
                                 Text("•")
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                     .foregroundColor(Theme.accent)
                                 Text(fact)
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                     .lineLimit(1)
                             }
                         }
                         if summary.allFacts.count > 5 {
                             Text("+\(summary.allFacts.count - 5) more facts")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -2624,7 +2674,7 @@ struct MenuBarView: View {
                         }
                         if summary.allConcepts.count > 4 {
                             Text("+\(summary.allConcepts.count - 4)")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -2634,7 +2684,7 @@ struct MenuBarView: View {
                 if !summary.allFiles.isEmpty {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Files (\(summary.allFiles.count))")
-                            .font(.system(size: 11, weight: .semibold))
+                            .shFont(11, weight: .semibold)
                             .foregroundColor(.secondary)
                         ForEach(summary.allFiles.prefix(5), id: \.self) { file in
                             Button {
@@ -2642,9 +2692,9 @@ struct MenuBarView: View {
                             } label: {
                                 HStack(spacing: 4) {
                                     Image(systemName: "doc.text")
-                                        .font(.system(size: 11))
+                                        .shFont(11)
                                     Text((file as NSString).lastPathComponent)
-                                        .font(.system(size: 11, design: .monospaced))
+                                        .shFont(11, design: .monospaced)
                                         .lineLimit(1)
                                 }
                                 .foregroundColor(.blue)
@@ -2653,7 +2703,7 @@ struct MenuBarView: View {
                         }
                         if summary.allFiles.count > 5 {
                             Text("+\(summary.allFiles.count - 5) more files")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -2668,9 +2718,9 @@ struct MenuBarView: View {
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "list.bullet")
-                                .font(.system(size: 11))
+                                .shFont(11)
                             Text("View memories")
-                                .font(.system(size: 11))
+                                .shFont(11)
                         }
                     }
                     .buttonStyle(.plain)
@@ -2683,9 +2733,9 @@ struct MenuBarView: View {
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "doc.on.doc")
-                                .font(.system(size: 11))
+                                .shFont(11)
                             Text("Copy Markdown")
-                                .font(.system(size: 11))
+                                .shFont(11)
                         }
                     }
                     .buttonStyle(.plain)
@@ -2696,9 +2746,9 @@ struct MenuBarView: View {
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "folder")
-                                .font(.system(size: 11))
+                                .shFont(11)
                             Text("Open in Finder")
-                                .font(.system(size: 11))
+                                .shFont(11)
                         }
                     }
                     .buttonStyle(.plain)
@@ -2763,31 +2813,31 @@ struct MenuBarView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(skill.displayName)
-                        .font(.system(size: 11, weight: .semibold))
+                        .shFont(11, weight: .semibold)
                     Spacer()
                     memoryTag(skill.category, icon: "tag")
                 }
 
                 Text(skill.description)
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
                     HStack(spacing: 3) {
                         Image(systemName: "doc.text")
-                            .font(.system(size: 11))
+                            .shFont(11)
                         Text("\(skill.lineCount) lines")
-                            .font(.system(size: 11))
+                            .shFont(11)
                     }
                     .foregroundColor(.secondary)
 
                     if skill.supportingFiles > 0 {
                         HStack(spacing: 3) {
                             Image(systemName: "doc.on.doc")
-                                .font(.system(size: 11))
+                                .shFont(11)
                             Text("+\(skill.supportingFiles) files")
-                                .font(.system(size: 11))
+                                .shFont(11)
                         }
                         .foregroundColor(.secondary)
                     }
@@ -2798,7 +2848,7 @@ struct MenuBarView: View {
                         openFileInFinder(skill.path)
                     } label: {
                         Image(systemName: "folder")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
@@ -2812,11 +2862,11 @@ struct MenuBarView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(plan.title)
-                        .font(.system(size: 11, weight: .semibold))
+                        .shFont(11, weight: .semibold)
                         .lineLimit(1)
                     Spacer()
                     Text(plan.date)
-                        .font(.system(size: 11, design: .monospaced))
+                        .shFont(11, design: .monospaced)
                         .foregroundColor(.secondary)
                 }
 
@@ -2836,14 +2886,14 @@ struct MenuBarView: View {
                         .frame(height: 4)
 
                         Text("\(plan.completedSteps)/\(plan.totalSteps)")
-                            .font(.system(size: 11, design: .monospaced))
+                            .shFont(11, design: .monospaced)
                             .foregroundColor(.secondary)
 
                         Button {
                             openFileInFinder(plan.path)
                         } label: {
                             Image(systemName: "folder")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                         .buttonStyle(.plain)
@@ -2858,10 +2908,10 @@ struct MenuBarView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(spec.title)
-                        .font(.system(size: 11, weight: .semibold))
+                        .shFont(11, weight: .semibold)
                         .lineLimit(1)
                     Text(spec.date)
-                        .font(.system(size: 11, design: .monospaced))
+                        .shFont(11, design: .monospaced)
                         .foregroundColor(.secondary)
                 }
                 Spacer()
@@ -2869,7 +2919,7 @@ struct MenuBarView: View {
                     openFileInFinder(spec.path)
                 } label: {
                     Image(systemName: "folder")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -2891,7 +2941,7 @@ struct MenuBarView: View {
         return VStack(alignment: .leading, spacing: 12) {
             // Description
             Text(fm.description)
-                .font(.system(size: 11))
+                .shFont(11)
                 .foregroundColor(.secondary)
                 .lineLimit(3)
 
@@ -2902,14 +2952,14 @@ struct MenuBarView: View {
                     SHCard {
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: principle.icon)
-                                .font(.system(size: 12))
+                                .shFont(12)
                                 .foregroundColor(Theme.accent)
                                 .frame(width: 20)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(principle.name)
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .shFont(11, weight: .semibold)
                                 Text(principle.description)
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                     .foregroundColor(.secondary)
                                     .lineLimit(3)
                             }
@@ -2924,7 +2974,7 @@ struct MenuBarView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 4)], spacing: 4) {
                     ForEach(tones, id: \.self) { tone in
                         Text(tone)
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -2943,10 +2993,10 @@ struct MenuBarView: View {
                     ForEach(antiPatterns) { pattern in
                         HStack(alignment: .top, spacing: 6) {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.red.opacity(0.7))
                             Text(pattern.text)
-                                .font(.system(size: 11))
+                                .shFont(11)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -2959,9 +3009,9 @@ struct MenuBarView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "book")
-                        .font(.system(size: 11))
+                        .shFont(11)
                     Text("Frontend Aesthetics Cookbook")
-                        .font(.system(size: 11))
+                        .shFont(11)
                 }
                 .foregroundColor(Theme.accent)
             }
@@ -2984,18 +3034,18 @@ struct MenuBarView: View {
             SHCard {
                 HStack(spacing: 8) {
                     Image(systemName: gm.isAuthenticated ? "checkmark.shield.fill" : "exclamationmark.shield")
-                        .font(.system(size: 14))
+                        .shFont(14)
                         .foregroundColor(gm.isAuthenticated ? .green : .orange)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(gm.isAuthenticated ? "Authenticated" : "Token not found")
-                            .font(.system(size: 11, weight: .semibold))
+                            .shFont(11, weight: .semibold)
                         Text(gm.isAuthenticated ? "GitHub MCP server ready" : "Set GITHUB_PERSONAL_ACCESS_TOKEN")
-                            .font(.system(size: 10))
+                            .shFont(10)
                             .foregroundColor(.secondary)
                     }
                     Spacer()
                     Text("\(tools.count) tools")
-                        .font(.system(size: 10, design: .monospaced))
+                        .shFont(10, design: .monospaced)
                         .foregroundColor(.secondary)
                 }
             }
@@ -3011,11 +3061,11 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 Image(systemName: tools.first?.icon ?? "wrench")
-                    .font(.system(size: 10))
+                    .shFont(10)
                     .foregroundColor(Theme.accent)
                 SHLabel(category)
                 Text("(\(tools.count))")
-                    .font(.system(size: 10))
+                    .shFont(10)
                     .foregroundColor(.secondary)
             }
 
@@ -3024,12 +3074,12 @@ struct MenuBarView: View {
                     ForEach(tools) { tool in
                         HStack(alignment: .top, spacing: 6) {
                             Text(tool.name)
-                                .font(.system(size: 10, design: .monospaced))
+                                .shFont(10, design: .monospaced)
                                 .foregroundColor(Theme.accent)
                                 .lineLimit(1)
                             Spacer()
                             Text(tool.description)
-                                .font(.system(size: 10))
+                                .shFont(10)
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                                 .multilineTextAlignment(.trailing)
@@ -3048,14 +3098,14 @@ struct MenuBarView: View {
             SHCard {
                 HStack(spacing: 8) {
                     Image(systemName: detail.isInstalled ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 14))
+                        .shFont(14)
                         .foregroundColor(detail.isInstalled ? .green : .secondary)
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(detail.name)
-                                .font(.system(size: 11, weight: .semibold))
+                                .shFont(11, weight: .semibold)
                             Text(detail.type.rawValue)
-                                .font(.system(size: 10, design: .monospaced))
+                                .shFont(10, design: .monospaced)
                                 .foregroundColor(.secondary)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -3065,7 +3115,7 @@ struct MenuBarView: View {
                                 )
                         }
                         Text(detail.description)
-                            .font(.system(size: 10))
+                            .shFont(10)
                             .foregroundColor(.secondary)
                             .lineLimit(2)
                     }
@@ -3079,14 +3129,14 @@ struct MenuBarView: View {
                     SHCard {
                         HStack(spacing: 8) {
                             Image(systemName: feature.icon)
-                                .font(.system(size: 12))
+                                .shFont(12)
                                 .foregroundColor(Theme.accent)
                                 .frame(width: 20)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(feature.name)
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .shFont(11, weight: .semibold)
                                 Text(feature.description)
-                                    .font(.system(size: 10))
+                                    .shFont(10)
                                     .foregroundColor(.secondary)
                             }
                             Spacer()
@@ -3104,13 +3154,13 @@ struct MenuBarView: View {
             // Search bar
             HStack(spacing: 4) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
                 TextField("Search plugins...", text: Binding(
                     get: { manager.pluginManager.searchText },
                     set: { manager.pluginManager.searchText = $0 }
                 ))
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .textFieldStyle(.plain)
             }
             .padding(.horizontal, 8)
@@ -3145,17 +3195,17 @@ struct MenuBarView: View {
                 VStack(spacing: 8) {
                     ProgressView()
                     Text("Loading plugins...")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 100)
             } else if manager.pluginManager.filteredPlugins.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "puzzlepiece.extension")
-                        .font(.system(size: 20))
+                        .shFont(20)
                         .foregroundColor(.secondary)
                     Text("No plugins found")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 100)
@@ -3176,13 +3226,13 @@ struct MenuBarView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(plugin.name)
-                                .font(.system(size: 11, weight: .semibold))
+                                .shFont(11, weight: .semibold)
                             Text("v\(plugin.version)")
-                                .font(.system(size: 11, design: .monospaced))
+                                .shFont(11, design: .monospaced)
                                 .foregroundColor(.secondary)
                         }
                         Text(plugin.marketplace)
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                     }
                     Spacer()
@@ -3190,7 +3240,7 @@ struct MenuBarView: View {
                 }
 
                 Text(plugin.description)
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
                     .lineLimit(2)
 
@@ -3200,9 +3250,9 @@ struct MenuBarView: View {
                     }
                     HStack(spacing: 3) {
                         Image(systemName: "arrow.down.circle")
-                            .font(.system(size: 11))
+                            .shFont(11)
                         Text(PluginManager.formatInstallCount(plugin.installCount))
-                            .font(.system(size: 11))
+                            .shFont(11)
                     }
                     .foregroundColor(.secondary)
                 }
@@ -3217,7 +3267,7 @@ struct MenuBarView: View {
                 .controlSize(.small)
         } else if plugin.isInstalled {
             Text("Installed")
-                .font(.system(size: 11, weight: .medium))
+                .shFont(11, weight: .medium)
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -3230,7 +3280,7 @@ struct MenuBarView: View {
                 manager.pluginManager.installPlugin(plugin)
             } label: {
                 Text("Install")
-                    .font(.system(size: 11, weight: .semibold))
+                    .shFont(11, weight: .semibold)
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -3246,7 +3296,7 @@ struct MenuBarView: View {
     private func categoryChip(_ label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                .shFont(11, weight: isSelected ? .semibold : .regular)
                 .foregroundColor(isSelected ? .primary : .secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -3274,10 +3324,10 @@ struct MenuBarView: View {
             if installed.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "puzzlepiece.extension")
-                        .font(.system(size: 20))
+                        .shFont(20)
                         .foregroundColor(.secondary)
                     Text("No plugins installed")
-                        .font(.system(size: 11))
+                        .shFont(11)
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 100)
@@ -3333,21 +3383,21 @@ struct MenuBarView: View {
                             .fill(Theme.accent.opacity(0.12))
                             .frame(width: 36, height: 36)
                         Image(systemName: pluginIcon(for: plugin.id))
-                            .font(.system(size: 16))
+                            .shFont(16)
                             .foregroundColor(Theme.accent)
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(plugin.name)
-                                .font(.system(size: 12, weight: .semibold))
+                                .shFont(12, weight: .semibold)
                                 .foregroundColor(.primary)
                             Text("v\(plugin.installedVersion ?? plugin.version)")
-                                .font(.system(size: 11, design: .monospaced))
+                                .shFont(11, design: .monospaced)
                                 .foregroundColor(.secondary)
                         }
                         Text(plugin.description)
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
@@ -3356,7 +3406,7 @@ struct MenuBarView: View {
 
                     // Open arrow
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .shFont(11, weight: .semibold)
                         .foregroundColor(Theme.accent)
                 }
 
@@ -3367,7 +3417,7 @@ struct MenuBarView: View {
                             .fill(plugin.isEnabled ? Color.green : Color.secondary)
                             .frame(width: 6, height: 6)
                         Text(plugin.isEnabled ? "Enabled" : "Disabled")
-                            .font(.system(size: 11))
+                            .shFont(11)
                             .foregroundColor(.secondary)
                     }
 
@@ -3423,9 +3473,9 @@ struct MenuBarView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(plugin.name)
-                                .font(.system(size: 11, weight: .semibold))
+                                .shFont(11, weight: .semibold)
                             Text("v\(plugin.installedVersion ?? plugin.version)")
-                                .font(.system(size: 11, design: .monospaced))
+                                .shFont(11, design: .monospaced)
                                 .foregroundColor(.secondary)
                         }
                         if !plugin.category.isEmpty {
@@ -3444,7 +3494,7 @@ struct MenuBarView: View {
                 }
 
                 Text(plugin.description)
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
                     .lineLimit(2)
 
@@ -3455,9 +3505,9 @@ struct MenuBarView: View {
                         } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "arrow.up.circle.fill")
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                 Text("Update to v\(plugin.version)")
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                             }
                             .foregroundColor(.orange)
                         }
@@ -3474,9 +3524,9 @@ struct MenuBarView: View {
                         } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "trash")
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                                 Text("Uninstall")
-                                    .font(.system(size: 11))
+                                    .shFont(11)
                             }
                             .foregroundColor(.red.opacity(0.8))
                         }
@@ -3492,9 +3542,9 @@ struct MenuBarView: View {
     private func memoryTag(_ text: String, icon: String) -> some View {
         HStack(spacing: 2) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .shFont(11)
             Text(text)
-                .font(.system(size: 11))
+                .shFont(11)
                 .lineLimit(1)
         }
         .foregroundColor(.secondary)
@@ -3589,7 +3639,7 @@ struct EmbeddedTerminalView: View {
                 Circle().fill(Color.yellow.opacity(0.8)).frame(width: 8, height: 8)
                 Circle().fill(Color.green.opacity(0.8)).frame(width: 8, height: 8)
                 Text("claude auth login")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .shFont(10, weight: .medium, design: .monospaced)
                     .foregroundColor(.white.opacity(0.5))
                 Spacer()
                 if session.isRunning {
@@ -3598,12 +3648,12 @@ struct EmbeddedTerminalView: View {
                             .fill(Color.green)
                             .frame(width: 5, height: 5)
                         Text("running")
-                            .font(.system(size: 9, weight: .medium))
+                            .shFont(9, weight: .medium)
                             .foregroundColor(.green.opacity(0.8))
                     }
                 } else {
                     Text("done")
-                        .font(.system(size: 9, weight: .medium))
+                        .shFont(9, weight: .medium)
                         .foregroundColor(.secondary)
                 }
             }
@@ -3617,7 +3667,7 @@ struct EmbeddedTerminalView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     Text(session.output.isEmpty ? " " : session.output)
-                        .font(.system(size: 11, design: .monospaced))
+                        .shFont(11, design: .monospaced)
                         .foregroundColor(.green.opacity(0.9))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
@@ -3675,7 +3725,7 @@ struct SHLabel: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold))
+            .shFont(11, weight: .semibold)
             .foregroundColor(.primary.opacity(0.7))
     }
 }
@@ -3692,7 +3742,7 @@ struct SHBadge: View {
                 .fill(color)
                 .frame(width: 5, height: 5)
             Text(text)
-                .font(.system(size: 11, weight: .medium))
+                .shFont(11, weight: .medium)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
@@ -3713,7 +3763,7 @@ struct SHTab: View {
     var body: some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 11, weight: isActive ? .semibold : .medium))
+                .shFont(11, weight: isActive ? .semibold : .medium)
                 .foregroundColor(isActive ? .primary : .secondary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 5)
@@ -3738,7 +3788,7 @@ struct SHIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
+                .shFont(11, weight: .medium)
                 .foregroundColor(.secondary)
                 .frame(width: 26, height: 26)
                 .background(
@@ -3780,10 +3830,10 @@ struct SHButton: View {
                 }
                 if let icon {
                     Image(systemName: icon)
-                        .font(.system(size: 11, weight: .semibold))
+                        .shFont(11, weight: .semibold)
                 }
                 Text(label)
-                    .font(.system(size: 11, weight: .medium))
+                    .shFont(11, weight: .medium)
             }
             .foregroundColor(foreground)
             .padding(.horizontal, 10)
@@ -3840,16 +3890,16 @@ struct SHStatCard: View {
     var body: some View {
         VStack(spacing: 3) {
             Text(label)
-                .font(.system(size: 11, weight: .medium))
+                .shFont(11, weight: .medium)
                 .foregroundColor(.secondary)
                 .textCase(.uppercase)
             Text(value)
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .shFont(14, weight: .bold, design: .monospaced)
                 .contentTransition(.numericText())
                 .animation(.easeOut(duration: 0.3), value: value)
             if !sub.isEmpty {
                 Text(sub)
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
             }
         }
@@ -3952,11 +4002,11 @@ struct SparklineView: View {
                     VStack(spacing: 1) {
                         if idx < labels.count {
                             Text(labels[idx])
-                                .font(.system(size: 11, weight: .medium))
+                                .shFont(11, weight: .medium)
                                 .foregroundColor(.secondary)
                         }
                         Text(formatCost(data[idx]))
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .shFont(11, weight: .bold, design: .monospaced)
                     }
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
@@ -4036,7 +4086,7 @@ struct HeatmapGrid: View {
             HStack(spacing: 3) {
                 Spacer()
                 Text("Less")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
                 ForEach(0..<5) { level in
                     RoundedRectangle(cornerRadius: 1.5, style: .continuous)
@@ -4046,7 +4096,7 @@ struct HeatmapGrid: View {
                         .frame(width: 7, height: 7)
                 }
                 Text("More")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
             }
             .padding(.top, 4)

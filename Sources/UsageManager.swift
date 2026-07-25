@@ -30,6 +30,32 @@ enum RefreshInterval: Int, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Popover text size
+
+/// Multiplier applied to every font in the popover. Stored as the raw multiplier
+/// so future presets can be added without migrating persisted values.
+enum TextScale: Double, CaseIterable, Identifiable {
+    case small = 0.9
+    case medium = 1.0
+    case large = 1.2
+    case extraLarge = 1.4
+
+    var id: Double { rawValue }
+
+    var label: String {
+        switch self {
+        case .small: return "S"
+        case .medium: return "M"
+        case .large: return "L"
+        case .extraLarge: return "XL"
+        }
+    }
+
+    static func nearest(to value: Double) -> TextScale {
+        allCases.min(by: { abs($0.rawValue - value) < abs($1.rawValue - value) }) ?? .medium
+    }
+}
+
 // MARK: - Menu bar display mode
 
 enum MenuBarDisplayMode: Int, CaseIterable, Identifiable {
@@ -381,6 +407,12 @@ class UsageManager: ObservableObject {
     @Published var compactMode: Bool {
         didSet {
             UserDefaults.standard.set(compactMode, forKey: UDKey.compactMode)
+        }
+    }
+
+    @Published var textScale: TextScale {
+        didSet {
+            UserDefaults.standard.set(textScale.rawValue, forKey: UDKey.textScale)
         }
     }
 
@@ -773,6 +805,8 @@ class UsageManager: ObservableObject {
         self.notificationThreshold = ud.object(forKey: UDKey.notificationThreshold) as? Double ?? 20.0
         self.launchAtLogin = ud.bool(forKey: UDKey.launchAtLogin)
         self.compactMode = ud.bool(forKey: UDKey.compactMode)
+        let savedTextScale = ud.double(forKey: UDKey.textScale)
+        self.textScale = savedTextScale > 0 ? TextScale.nearest(to: savedTextScale) : .medium
         self.autoReconnect = ud.bool(forKey: UDKey.autoReconnect)
         let savedHeight = ud.double(forKey: UDKey.windowHeight)
         self.windowHeight = savedHeight > 0 ? savedHeight : 650

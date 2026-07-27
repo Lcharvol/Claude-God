@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.24.0] - 2026-07-27
+
+### Added
+- **Adjustable popover text size (S / M / L / XL)** — a new preset picker in Settings resizes every font in the popover (Usage, Analytics, Timeline, ROI, Extensions, Settings). Implemented as a `textScale` environment value plus a `.shFont(_:weight:design:)` view modifier that multiplies each requested point size by the user's preference, so text is laid out and rasterized at its real size (no `.scaleEffect` blur). Popover width scales with the multiplier so bigger type doesn't wrap. Menu bar rendering is untouched; default `M` (1.0) leaves existing users unchanged ([#33](https://github.com/Lcharvol/Claude-God/issues/33), [#39](https://github.com/Lcharvol/Claude-God/pull/39), thanks @nairdaleo)
+- **Model-scoped weekly quotas surfaced in the usage list** — model-specific weekly limits (currently the **Fable** quota on Max plans and above) only appear in the OAuth response's `limits` array, not as a top-level bucket. Each `weekly_scoped` entry is now decoded and rendered as `"Weekly (<name>)"` (e.g. "Weekly (Fable)"), lining up with the existing "Weekly (all)" row. Scoped quotas are appended after the legacy buckets so the menu bar `W %` first-match lookup still resolves to "Weekly (all)"; downstream code (notifications, alert rules, rings, widget) picks them up generically. Accounts without scoped limits see no difference ([#36](https://github.com/Lcharvol/Claude-God/pull/36), thanks @pieropalevsky)
+
+### Fixed
+- **Permanent "Session expired" that no sign-in could clear** — two independent bugs combined into an unrecoverable state:
+  - `loadCredentials()` / `reloadCredentials()` returned the contents of `~/.claude/.credentials.json` whenever it held a non-empty `accessToken`, without ever checking expiry. Newer Claude Code versions refresh into the Keychain and leave the file stale, so the app pinned itself to a dead token while a valid one sat in the Keychain unread — and the expired-credential poller re-read the same dead file every 10s. Both entry points now delegate to a single `resolveCredentials(completion:)`: the file is used only while its token is still valid (fast path, no Keychain round-trip in the common case), otherwise the best Keychain entry is compared against the file and whichever `expiresAt` is later wins, then the `CLAUDE_CODE_OAUTH_TOKEN` env var as a final fallback. A read that finds nothing no longer clears `isAuthenticated` when a token was already loaded, so a transient failure can't sign the user out.
+  - The embedded sign-in terminal ran `claude auth login` in a PTY but had no stdin write path, so the "paste your authorization code" prompt was unanswerable and every in-app sign-in timed out. `TerminalSession.send(_:)` now performs a line-buffered write to the master FD (handling partial writes), and `EmbeddedTerminalView` shows a monospaced input row while the session is running.
+  
+  ([#37](https://github.com/Lcharvol/Claude-God/issues/37), [#38](https://github.com/Lcharvol/Claude-God/pull/38))
+
 ## [2.23.4] - 2026-06-15
 
 ### Fixed

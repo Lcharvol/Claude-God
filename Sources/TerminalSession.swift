@@ -79,6 +79,27 @@ final class TerminalSession: ObservableObject {
         startReading()
     }
 
+    // MARK: - Input
+
+    /// Write a line to the child process's stdin.
+    /// `claude auth login` asks the user to paste an authorization code, so the
+    /// embedded session is unusable without a way to answer it.
+    func send(_ line: String) {
+        guard masterFD >= 0, let data = (line + "\n").data(using: .utf8) else { return }
+        data.withUnsafeBytes { buffer in
+            guard let base = buffer.baseAddress else { return }
+            var written = 0
+            while written < buffer.count {
+                let n = write(masterFD, base.advanced(by: written), buffer.count - written)
+                guard n > 0 else {
+                    Log.warn("TerminalSession.send: write failed: \(String(cString: strerror(errno)))")
+                    return
+                }
+                written += n
+            }
+        }
+    }
+
     // MARK: - Stop
 
     func stop() {

@@ -40,52 +40,94 @@ class AuthManager: ObservableObject {
     // MARK: - Credential loading
 
     func loadCredentials() {
-        // 1. File ~/.claude/.credentials.json
-        if let data = try? Data(contentsOf: Self.credentialsPath),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let oauth = json["claudeAiOauth"] as? [String: Any],
-           let token = oauth["accessToken"] as? String, !token.isEmpty {
-            accessToken = token
-            refreshToken = oauth["refreshToken"] as? String
-            tokenExpiresAt = oauth["expiresAt"] as? Double
-            subscriptionType = oauth["subscriptionType"] as? String ?? ""
-            credentialSource = .file
-            isAuthenticated = true
-            Log.info("Credentials loaded from file (type: \(subscriptionType))")
+        resolveCredentials { _ in }
+    }
+
+    /// Credentials JSON from `~/.claude/.credentials.json`, or nil if absent/unusable.
+    private static func fileCredentialsJSON() -> [String: Any]? {
+        guard let data = try? Data(contentsOf: credentialsPath),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = json["claudeAiOauth"] as? [String: Any],
+              let token = oauth["accessToken"] as? String, !token.isEmpty
+        else { return nil }
+        return json
+    }
+
+    private static func oauthExpiry(_ json: [String: Any]) -> Double {
+        ((json["claudeAiOauth"] as? [String: Any])?["expiresAt"] as? Double) ?? 0
+    }
+
+    /// Adopt a credentials payload. Returns false if it carries no usable token.
+    @discardableResult
+    private func adopt(_ json: [String: Any], source: CredentialSource) -> Bool {
+        guard let oauth = json["claudeAiOauth"] as? [String: Any],
+              let token = oauth["accessToken"] as? String, !token.isEmpty
+        else { return false }
+        accessToken = token
+        refreshToken = oauth["refreshToken"] as? String
+        tokenExpiresAt = oauth["expiresAt"] as? Double
+        subscriptionType = oauth["subscriptionType"] as? String ?? ""
+        credentialSource = source
+        isAuthenticated = true
+        return true
+    }
+
+    /// Resolve credentials from the freshest available source.
+    ///
+    /// The file is only authoritative while its token is still valid: newer Claude Code
+    /// versions refresh into the Keychain (per-project entries) and leave a stale
+    /// `.credentials.json` behind. Preferring the file unconditionally pinned the app to
+    /// an expired token, so re-signing in never cleared "Session expired".
+    private func resolveCredentials(completion: @escaping (Bool) -> Void) {
+        let previousToken = accessToken
+        let fileJSON = Self.fileCredentialsJSON()
+
+        // Fast path: file token still valid — no Keychain round-trip needed.
+        if let fileJSON, Self.hasFreshOAuthToken(fileJSON), adopt(fileJSON, source: .file) {
+            if accessToken != previousToken { Log.info("Credentials loaded from file (type: \(subscriptionType))") }
+            completion(true)
             return
         }
 
-        // 2. Keychain — load off main thread to avoid blocking UI
+        // Keychain — read off the main thread to avoid blocking UI.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let keychainJSON = Self.loadFromKeychain()
             DispatchQueue.main.async {
                 guard let self else { return }
-                if let keychainJSON,
-                   let oauth = keychainJSON["claudeAiOauth"] as? [String: Any],
-                   let token = oauth["accessToken"] as? String, !token.isEmpty {
-                    self.accessToken = token
-                    self.refreshToken = oauth["refreshToken"] as? String
-                    self.tokenExpiresAt = oauth["expiresAt"] as? Double
-                    self.subscriptionType = oauth["subscriptionType"] as? String ?? ""
-                    self.credentialSource = .keychain
-                    self.isAuthenticated = true
-                    Log.info("Credentials loaded from Keychain (type: \(self.subscriptionType))")
+
+                // Both sources may be stale; take whichever token lives longest.
+                let candidates: [([String: Any], CredentialSource)] = [
+                    keychainJSON.map { ($0, CredentialSource.keychain) },
+                    fileJSON.map { ($0, CredentialSource.file) }
+                ].compactMap { $0 }
+
+                if let best = candidates.max(by: { Self.oauthExpiry($0.0) < Self.oauthExpiry($1.0) }),
+                   self.adopt(best.0, source: best.1) {
+                    if self.accessToken != previousToken {
+                        Log.info("Credentials loaded from \(best.1.rawValue) (type: \(self.subscriptionType))")
+                    }
+                    completion(true)
                     return
                 }
 
-                // 3. Environment variable
                 if let envToken = ProcessInfo.processInfo.environment["CLAUDE_CODE_OAUTH_TOKEN"],
                    !envToken.isEmpty {
                     self.accessToken = envToken
                     self.credentialSource = .environment
                     self.isAuthenticated = true
                     Log.info("Credentials loaded from environment")
+                    completion(true)
                     return
                 }
 
-                self.credentialSource = .none
-                self.isAuthenticated = false
-                Log.warn("No credentials found")
+                Log.warn("No credentials found in file or Keychain")
+                // Keep a previously loaded token: a transient read failure shouldn't
+                // sign the user out.
+                if previousToken == nil {
+                    self.credentialSource = .none
+                    self.isAuthenticated = false
+                }
+                completion(self.isAuthenticated)
             }
         }
     }
@@ -104,52 +146,11 @@ class AuthManager: ObservableObject {
         return Date() >= expiresDate
     }
 
-    /// Reload credentials from disk first, then keychain as fallback.
-    /// On macOS, Claude Code may store credentials exclusively in keychain
-    /// (deleting .credentials.json), so we must check both sources.
+    /// Reload credentials, preferring whichever source holds the longest-lived token.
+    /// On macOS, Claude Code may store credentials exclusively in the Keychain
+    /// (or refresh only there), so both sources must be compared.
     func reloadCredentials(completion: @escaping (Bool) -> Void) {
-        let previousToken = accessToken
-
-        // 1. Try file first
-        if let data = try? Data(contentsOf: Self.credentialsPath),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let oauth = json["claudeAiOauth"] as? [String: Any],
-           let token = oauth["accessToken"] as? String, !token.isEmpty {
-            accessToken = token
-            refreshToken = oauth["refreshToken"] as? String
-            tokenExpiresAt = oauth["expiresAt"] as? Double
-            subscriptionType = oauth["subscriptionType"] as? String ?? ""
-            credentialSource = .file
-            isAuthenticated = true
-            let changed = accessToken != previousToken
-            if changed { Log.info("Credentials reloaded from file") }
-            completion(true)
-            return
-        }
-
-        // 2. Fallback to keychain (off main thread)
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let keychainJSON = Self.loadFromKeychain()
-            DispatchQueue.main.async {
-                guard let self else { return }
-                if let keychainJSON,
-                   let oauth = keychainJSON["claudeAiOauth"] as? [String: Any],
-                   let token = oauth["accessToken"] as? String, !token.isEmpty {
-                    self.accessToken = token
-                    self.refreshToken = oauth["refreshToken"] as? String
-                    self.tokenExpiresAt = oauth["expiresAt"] as? Double
-                    self.subscriptionType = oauth["subscriptionType"] as? String ?? ""
-                    self.credentialSource = .keychain
-                    self.isAuthenticated = true
-                    let changed = self.accessToken != previousToken
-                    if changed { Log.info("Credentials reloaded from Keychain") }
-                    completion(true)
-                } else {
-                    Log.warn("No credentials found in file or Keychain")
-                    completion(self.isAuthenticated)
-                }
-            }
-        }
+        resolveCredentials(completion: completion)
     }
 
     // MARK: - Silent token self-refresh

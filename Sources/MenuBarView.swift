@@ -3633,6 +3633,7 @@ struct MenuBarView: View {
 
 struct EmbeddedTerminalView: View {
     @ObservedObject var session: TerminalSession
+    @State private var input: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -3681,6 +3682,27 @@ struct EmbeddedTerminalView: View {
                 }
             }
             .frame(height: 130)
+
+            // Input — `claude auth login` prompts for a pasted authorization code
+            if session.isRunning {
+                Divider().background(Color.white.opacity(0.08))
+                HStack(spacing: 6) {
+                    Text("›")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.green.opacity(0.7))
+                    TextField("Paste code and press ⏎", text: $input)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.9))
+                        .onSubmit {
+                            session.send(input)
+                            input = ""
+                        }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.4))
+            }
         }
         .background(Color(red: 0.05, green: 0.05, blue: 0.05))
         .cornerRadius(8)

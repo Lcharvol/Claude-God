@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.24.2] - 2026-07-27
+
+### Fixed
+- **"Sign In" button did nothing, no error shown** — on a fresh install without the `claude` CLI on `PATH`, clicking Sign In in the Settings pane flashed "Signing in..." for ~200ms then reverted to "Sign In" with no visible feedback. `launchAutoReconnect` was setting the correct error message ("Claude CLI not found. Install it with `npm i -g @anthropic-ai/claude-code`…"), but the Settings Authentication card only rendered the button — it never displayed `errorMessage`. Only the Usage-tab error banner did, and fresh-install users are routed straight to Settings (`!isAuthenticated` forces `settingsView`), so they could never see it. The Authentication card now shows the error under the Sign In button whenever it's set and no embedded terminal is active
+
 ## [2.24.1] - 2026-07-27
 
 ### Fixed

@@ -164,6 +164,9 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.24.2
+- **Fixed**: "Sign In" button in Settings appeared to do nothing on a fresh install — clicking it flashed "Signing in..." briefly then silently reverted. The error message ("Claude CLI not found — install with `npm i -g @anthropic-ai/claude-code`") was set correctly but was only rendered in the Usage-tab error banner, which fresh-install users never see (they're routed straight to Settings by the `!isAuthenticated` gate). The Authentication card now displays the error under the Sign In button
+
 ### v2.24.1
 - **Fixed**: Intel Mac support restored — the release DMG is now a universal binary (arm64 + x86_64). The GitHub Actions Apple Silicon runner was producing arm64-only builds that Intel users couldn't launch; added `ARCHS="arm64 x86_64"` + `ONLY_ACTIVE_ARCH=NO` to the workflow, no source changes needed ([#34](https://github.com/Lcharvol/Claude-God/issues/34), thanks @kelvincht)
 

@@ -330,6 +330,17 @@ struct MenuBarView: View {
                                 manager.launchAutoReconnect()
                             }
                             .disabled(manager.isAutoReconnecting)
+                            if let error = manager.errorMessage, manager.terminalSession == nil {
+                                HStack(alignment: .top, spacing: 6) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .shFont(11, weight: .medium)
+                                        .foregroundColor(.orange)
+                                    Text(error)
+                                        .shFont(11)
+                                        .foregroundColor(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
                             if let session = manager.terminalSession {
                                 EmbeddedTerminalView(session: session)
                             }

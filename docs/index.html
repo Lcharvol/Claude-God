@@ -1205,6 +1205,15 @@
         <div style="max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:1px;background:var(--border);border-radius:16px;overflow:hidden;border:1px solid var(--border)">
             <div style="background:var(--card);padding:1.5rem">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                    <span style="font-weight:700;font-size:1rem">v2.24.2</span>
+                    <span style="font-size:0.75rem;color:var(--muted)">2026-07-27</span>
+                </div>
+                <p style="color:var(--text-2);font-size:0.88rem;margin:0;line-height:1.5">
+                    <strong style="color:var(--accent)">Fixed:</strong> "Sign In" button in Settings appeared to do nothing on a fresh install &mdash; clicking it briefly flashed "Signing in&hellip;" then silently reverted. The error ("Claude CLI not found &mdash; install with <code>npm i -g @anthropic-ai/claude-code</code>") was set correctly but only rendered in the Usage-tab error banner, which fresh-install users never see. The Authentication card now displays the error under the Sign In button.
+                </p>
+            </div>
+            <div style="background:var(--card);padding:1.5rem">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
                     <span style="font-weight:700;font-size:1rem">v2.24.1</span>
                     <span style="font-size:0.75rem;color:var(--muted)">2026-07-27</span>
                 </div>

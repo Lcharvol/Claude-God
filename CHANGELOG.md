@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.24.3] - 2026-07-27
+
+### Fixed
+- **Transparent phantom window when changing text size** — switching between S / M / L / XL left a visible transparent halo around the popover because `WindowTopAnchor` only resized the underlying `NSPanel`'s height, not its width. The SwiftUI content resized to match the new `textScale`, but the `NSPanel` kept its previous width, so shrinking left extra empty backing on one side and growing pushed content beyond the window edge. The anchor now tracks width too and keeps the top-right corner (`maxX`, `maxY`) fixed, so the popover stays anchored under its status item and expands leftward — matching macOS's natural popover behavior instead of drifting off the right edge of the display
+
 ## [2.24.2] - 2026-07-27
 
 ### Fixed

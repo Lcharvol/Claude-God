@@ -164,6 +164,9 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.24.3
+- **Fixed**: Transparent phantom window when changing text size — `WindowTopAnchor` only resized the `NSPanel`'s height, so SwiftUI's content resize on textScale change left an empty backing halo (or overflowed the window). Anchor now resizes width too and keeps the top-right corner fixed so the popover stays anchored under its status item
+
 ### v2.24.2
 - **Fixed**: "Sign In" button in Settings appeared to do nothing on a fresh install — clicking it flashed "Signing in..." briefly then silently reverted. The error message ("Claude CLI not found — install with `npm i -g @anthropic-ai/claude-code`") was set correctly but was only rendered in the Usage-tab error banner, which fresh-install users never see (they're routed straight to Settings by the `!isAuthenticated` gate). The Authentication card now displays the error under the Sign In button
 

@@ -127,17 +127,23 @@ struct MenuBarView: View {
         // It never shrinks below the base width: Settings holds fixed-width controls
         // (pickers, ring preview) whose minimum exceeds a narrowed window, and the
         // overflow gets clipped on both edges.
-        .frame(width: (manager.compactMode && !manager.showSettings && manager.selectedTab == .usage ? 300 : 400)
-                      * max(manager.textScale.rawValue, 1.0),
-               height: manager.windowHeight)
+        .frame(width: popoverWidth, height: manager.windowHeight)
         .environment(\.textScale, manager.textScale.rawValue)
-        .background(WindowTopAnchor(height: manager.windowHeight))
+        .background(WindowTopAnchor(width: popoverWidth, height: manager.windowHeight))
         .animation(.easeOut(duration: 0.15), value: manager.selectedTab)
         .animation(.easeOut(duration: 0.15), value: manager.showSettings)
         .onAppear {
             manager.refreshIfStale()
             manager.refreshStatsIfStale()
         }
+    }
+
+    /// Popover width in points — grows with the text scale so bigger type doesn't wrap,
+    /// and drives both the SwiftUI frame and the underlying `NSPanel` resize
+    /// (`WindowTopAnchor`) so the two never disagree.
+    private var popoverWidth: CGFloat {
+        let base: CGFloat = (manager.compactMode && !manager.showSettings && manager.selectedTab == .usage) ? 300 : 400
+        return base * max(manager.textScale.rawValue, 1.0)
     }
 
     // MARK: - Header
@@ -4189,6 +4195,7 @@ struct ResizeHandle: View {
 /// changes. Without this, SwiftUI resizes from the window's center point in Release
 /// builds, causing the popover to grow/shrink from both the top and bottom.
 struct WindowTopAnchor: NSViewRepresentable {
+    let width: CGFloat
     let height: Double
 
     func makeNSView(context: Context) -> NSView { NSView() }
@@ -4198,12 +4205,17 @@ struct WindowTopAnchor: NSViewRepresentable {
         DispatchQueue.main.async {
             guard let window = nsView.window else { return }
             let current = window.frame
-            guard abs(current.height - height) > 0.5 else { return }
-            // Keep the top edge (maxY) fixed; adjust origin.y downward as height grows.
+            let widthChanged = abs(current.width - width) > 0.5
+            let heightChanged = abs(current.height - height) > 0.5
+            guard widthChanged || heightChanged else { return }
+            // Keep the top-right corner (maxX, maxY) fixed: height grows downward from
+            // the status bar, width grows leftward so the popover stays under its status
+            // item instead of pushing off the right edge of the display.
+            let newOriginX = current.maxX - width
             let newOriginY = current.maxY - height
             window.setFrame(
-                NSRect(x: current.origin.x, y: newOriginY,
-                       width: current.width, height: height),
+                NSRect(x: newOriginX, y: newOriginY,
+                       width: width, height: height),
                 display: false,
                 animate: false
             )

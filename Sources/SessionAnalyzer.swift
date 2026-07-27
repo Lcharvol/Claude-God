@@ -11,6 +11,7 @@ enum UDKey {
     static let notificationThreshold = "notificationThreshold"
     static let launchAtLogin = "launchAtLogin"
     static let compactMode = "compactMode"
+    static let textScale = "textScale"
     static let menuBarDisplayMode = "menuBarDisplayMode"
     static let dailyBudget = "dailyBudget"
     static let dailyRange = "dailyRange"

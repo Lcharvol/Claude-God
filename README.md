@@ -164,6 +164,9 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.24.1
+- **Fixed**: Intel Mac support restored — the release DMG is now a universal binary (arm64 + x86_64). The GitHub Actions Apple Silicon runner was producing arm64-only builds that Intel users couldn't launch; added `ARCHS="arm64 x86_64"` + `ONLY_ACTIVE_ARCH=NO` to the workflow, no source changes needed ([#34](https://github.com/Lcharvol/Claude-God/issues/34), thanks @kelvincht)
+
 ### v2.24.0
 - **Added**: Adjustable popover text size (S / M / L / XL) — new preset picker in Settings resizes every font in the popover via a `textScale` environment value + `.shFont(...)` view modifier (no `.scaleEffect` blur). Popover width scales with the multiplier so bigger type doesn't wrap. Menu bar untouched; default `M` (1.0) leaves existing users unchanged ([#33](https://github.com/Lcharvol/Claude-God/issues/33), [#39](https://github.com/Lcharvol/Claude-God/pull/39), thanks @nairdaleo)
 - **Added**: Model-scoped weekly quotas surfaced in the usage list — `weekly_scoped` entries from the OAuth `limits` array (currently the **Fable** weekly quota on Max+) now render as `"Weekly (<name>)"` alongside the existing "Weekly (all)" row, and downstream code (notifications, alert rules, rings, widget) picks them up generically ([#36](https://github.com/Lcharvol/Claude-God/pull/36), thanks @pieropalevsky)

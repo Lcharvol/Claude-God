@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.24.1] - 2026-07-27
+
+### Fixed
+- **Intel Mac support restored** — the release DMG is now a universal binary (arm64 + x86_64) that runs on both Apple Silicon and Intel Macs. The GitHub Actions runner is Apple Silicon (`macos-15`) and `xcodebuild` was building only the runner's active arch, so every release since the CI move produced an arm64-only binary that Intel users couldn't launch. Added `ARCHS="arm64 x86_64"` + `ONLY_ACTIVE_ARCH=NO` to the workflow; no source changes needed (pure SwiftUI + WidgetKit, zero native deps) ([#34](https://github.com/Lcharvol/Claude-God/issues/34), thanks @kelvincht for the diagnosis and the exact fix)
+
 ## [2.24.0] - 2026-07-27
 
 ### Added

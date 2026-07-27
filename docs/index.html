@@ -1205,6 +1205,15 @@
         <div style="max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:1px;background:var(--border);border-radius:16px;overflow:hidden;border:1px solid var(--border)">
             <div style="background:var(--card);padding:1.5rem">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                    <span style="font-weight:700;font-size:1rem">v2.24.1</span>
+                    <span style="font-size:0.75rem;color:var(--muted)">2026-07-27</span>
+                </div>
+                <p style="color:var(--text-2);font-size:0.88rem;margin:0;line-height:1.5">
+                    <strong style="color:var(--accent)">Fixed:</strong> Intel Mac support restored &mdash; release DMG is now a universal binary (arm64 + x86_64). The GitHub Actions Apple Silicon runner was producing arm64-only builds that Intel users couldn't launch; added <code>ARCHS="arm64 x86_64"</code> + <code>ONLY_ACTIVE_ARCH=NO</code> to the workflow.
+                </p>
+            </div>
+            <div style="background:var(--card);padding:1.5rem">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
                     <span style="font-weight:700;font-size:1rem">v2.24.0</span>
                     <span style="font-size:0.75rem;color:var(--muted)">2026-07-27</span>
                 </div>

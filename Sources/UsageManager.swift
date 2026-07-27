@@ -165,6 +165,7 @@ private struct OAuthUsageResponse: Decodable {
     let iguanaNecktie: QuotaData?
     let omelettPromotional: QuotaData?
     let extraUsage: ExtraUsageData?
+    let limits: [LimitEntry]?
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
@@ -177,6 +178,35 @@ private struct OAuthUsageResponse: Decodable {
         case iguanaNecktie = "iguana_necktie"
         case omelettPromotional = "omelette_promotional"
         case extraUsage = "extra_usage"
+        case limits
+    }
+}
+
+/// Entry in the `limits` array — model-scoped quotas (e.g. the Fable weekly
+/// limit) only appear here, not as top-level buckets.
+private struct LimitEntry: Decodable {
+    let kind: String
+    let percent: Double?
+    let resetsAt: String?
+    let scope: LimitScope?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case percent
+        case resetsAt = "resets_at"
+        case scope
+    }
+}
+
+private struct LimitScope: Decodable {
+    let model: LimitScopeModel?
+}
+
+private struct LimitScopeModel: Decodable {
+    let displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case displayName = "display_name"
     }
 }
 
@@ -1661,6 +1691,19 @@ class UsageManager: ObservableObject {
             (response.omelettPromotional,"Design Promo (7d)",   "gift.fill"),
         ]
 
+        let scopedWeeklyQuotas = (response.limits ?? [])
+            .filter { $0.kind == "weekly_scoped" }
+            .compactMap { entry -> UsageQuota? in
+                guard let name = entry.scope?.model?.displayName,
+                      let percent = entry.percent else { return nil }
+                return UsageQuota(
+                    label: "Weekly (\(name))",
+                    icon: "book.fill",
+                    utilization: percent,
+                    resetsAt: entry.resetsAt.flatMap(Formatters.parseISO)
+                )
+            }
+
         quotas = quotaDefs.compactMap { def in
             guard let q = def.quota else { return nil }
             return UsageQuota(
@@ -1669,7 +1712,7 @@ class UsageManager: ObservableObject {
                 utilization: q.utilization,
                 resetsAt: q.resetsAt.flatMap(Formatters.parseISO)
             )
-        }
+        } + scopedWeeklyQuotas
         extraUsage = response.extraUsage
         Log.info("Parsed \(quotas.count) quotas, extraUsage=\(response.extraUsage != nil)")
     }

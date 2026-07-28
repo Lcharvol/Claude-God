@@ -146,6 +146,113 @@ struct MenuBarView: View {
         return base * max(manager.textScale.rawValue, 1.0)
     }
 
+    // MARK: - Integrations (JSON export + Claude Code statusline)
+
+    @State private var copiedIntegration: String? = nil
+
+    @ViewBuilder
+    private var integrationsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SHLabel("Integrations")
+
+            // JSON export toggle
+            Toggle("Export usage as JSON", isOn: $manager.exportUsageJSON)
+                .shFont(12)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            Text("Writes ~/.claude-god/usage.json after every refresh. Point tmux, i3blocks, dashboards, or your own scripts at it.")
+                .shFont(10)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if manager.exportUsageJSON {
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.text")
+                        .shFont(10)
+                        .foregroundColor(.secondary)
+                    Text(UsageExporter.usageFileURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                        .shFont(10, design: .monospaced)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button {
+                        NSWorkspace.shared.selectFile(
+                            UsageExporter.usageFileURL.path,
+                            inFileViewerRootedAtPath: UsageExporter.baseDirectory.path
+                        )
+                    } label: {
+                        Image(systemName: "arrow.up.forward.app")
+                            .shFont(11)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reveal in Finder")
+                }
+            }
+
+            SHDivider()
+
+            // Claude Code statusline
+            HStack {
+                Text("Claude Code statusline")
+                    .shFont(12, weight: .medium)
+                Spacer()
+                if manager.statuslineInstalled {
+                    SHBadge(text: "Installed", color: .green)
+                }
+            }
+            Text("Adds a live \"session · weekly · today\" line inside every Claude Code prompt.")
+                .shFont(10)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if manager.statuslineInstalled {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Add this to ~/.claude/settings.json:")
+                        .shFont(10)
+                        .foregroundColor(.secondary)
+                    Text(UsageExporter.statuslineConfigSnippet)
+                        .shFont(10, design: .monospaced)
+                        .foregroundColor(.secondary)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.primary.opacity(0.04))
+                        )
+                    HStack(spacing: 6) {
+                        SHButton(
+                            label: copiedIntegration == "config" ? "Copied!" : "Copy config",
+                            icon: copiedIntegration == "config" ? "checkmark" : "doc.on.clipboard",
+                            style: .ghost
+                        ) {
+                            let pb = NSPasteboard.general
+                            pb.clearContents()
+                            pb.setString(UsageExporter.statuslineConfigSnippet, forType: .string)
+                            copiedIntegration = "config"
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                                if copiedIntegration == "config" { copiedIntegration = nil }
+                            }
+                        }
+                        SHButton(label: "Uninstall", icon: "trash", style: .ghost) {
+                            UsageExporter.uninstallStatuslineScript()
+                            manager.statuslineInstalled = false
+                        }
+                    }
+                }
+            } else {
+                SHButton(label: "Install statusline helper", icon: "terminal", style: .outline) {
+                    if UsageExporter.installStatuslineScript() != nil {
+                        // Statusline reads the JSON, so opt user in automatically.
+                        if !manager.exportUsageJSON { manager.exportUsageJSON = true }
+                        manager.statuslineInstalled = true
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Header
 
     private var header: some View {
@@ -646,6 +753,11 @@ struct MenuBarView: View {
                         .disabled(manager.isAutoReconnecting)
                     }
                 }
+            }
+
+            // Integrations
+            SHCard {
+                integrationsSection
             }
 
             // About

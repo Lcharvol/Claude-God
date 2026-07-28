@@ -164,6 +164,11 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.25.0
+- **Added**: JSON usage export — opt-in toggle writes a full snapshot to `~/.claude-god/usage.json` after every refresh, so tmux/i3blocks/dashboards can read live Claude usage without hitting the OAuth API themselves
+- **Added**: Claude Code statusline integration — one-click install a helper script that prints `session · weekly · today` colored inside every Claude Code prompt via the `statusLine` setting
+- **Added**: Notarized release pipeline — the CI transparently upgrades from ad-hoc to Developer ID signing + Apple notarization + stapling as soon as the six Apple secrets are configured on the repo; users then no longer need to run `xattr -cr` after install ([setup guide](docs/NOTARIZATION.md))
+
 ### v2.24.3
 - **Fixed**: Transparent phantom window when changing text size — `WindowTopAnchor` only resized the `NSPanel`'s height, so SwiftUI's content resize on textScale change left an empty backing halo (or overflowed the window). Anchor now resizes width too and keeps the top-right corner fixed so the popover stays anchored under its status item
 

@@ -28,6 +28,8 @@ enum UDKey {
     static let widgetLastUpdate = "widgetLastUpdate"
     static let windowHeight = "windowHeight"
     static let ringStatLabels = "ringStatLabels"
+    static let exportUsageJSON = "exportUsageJSON"
+    static let statuslineInstalled = "statuslineInstalled"
 }
 
 // MARK: - Logging

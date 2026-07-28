@@ -446,6 +446,27 @@ class UsageManager: ObservableObject {
         }
     }
 
+    /// When on, the current usage snapshot is written to `~/.claude-god/usage.json`
+    /// after every refresh so external tools (statusline, tmux, dashboards) can read it.
+    @Published var exportUsageJSON: Bool {
+        didSet {
+            UserDefaults.standard.set(exportUsageJSON, forKey: UDKey.exportUsageJSON)
+            if exportUsageJSON {
+                exportSnapshotIfEnabled()
+            } else {
+                UsageExporter.removeSnapshot()
+            }
+        }
+    }
+
+    /// True once the user has run the "install statusline helper" flow.
+    /// Owned by Settings UI; drives label state ("Installed" vs "Install").
+    @Published var statuslineInstalled: Bool {
+        didSet {
+            UserDefaults.standard.set(statuslineInstalled, forKey: UDKey.statuslineInstalled)
+        }
+    }
+
     @Published var autoReconnect: Bool {
         didSet {
             UserDefaults.standard.set(autoReconnect, forKey: UDKey.autoReconnect)
@@ -837,6 +858,8 @@ class UsageManager: ObservableObject {
         self.compactMode = ud.bool(forKey: UDKey.compactMode)
         let savedTextScale = ud.double(forKey: UDKey.textScale)
         self.textScale = savedTextScale > 0 ? TextScale.nearest(to: savedTextScale) : .medium
+        self.exportUsageJSON = ud.bool(forKey: UDKey.exportUsageJSON)
+        self.statuslineInstalled = ud.bool(forKey: UDKey.statuslineInstalled)
         self.autoReconnect = ud.bool(forKey: UDKey.autoReconnect)
         let savedHeight = ud.double(forKey: UDKey.windowHeight)
         self.windowHeight = savedHeight > 0 ? savedHeight : 650
@@ -1007,6 +1030,7 @@ class UsageManager: ObservableObject {
                 self?.sessionHistory = result.recentSessions
                 self?.isLoadingStats = false
                 self?.lastStatsRefresh = Date()
+                self?.exportSnapshotIfEnabled()
                 Log.info("Stats: today=$\(String(format: "%.2f", today.totalCost)) week=$\(String(format: "%.2f", week.totalCost)) month=$\(String(format: "%.2f", month.totalCost)) projects=\(month.byProject.count) sessions=\(result.recentSessions.count)")
             }
         }
@@ -1715,6 +1739,32 @@ class UsageManager: ObservableObject {
         } + scopedWeeklyQuotas
         extraUsage = response.extraUsage
         Log.info("Parsed \(quotas.count) quotas, extraUsage=\(response.extraUsage != nil)")
+        exportSnapshotIfEnabled()
+    }
+
+    /// Write the current usage snapshot to `~/.claude-god/usage.json` when the
+    /// user has opted into the export. No-op otherwise. Called after every
+    /// successful OAuth refresh and after JSONL stats reload so external
+    /// consumers (statusline, tmux) see the freshest numbers.
+    func exportSnapshotIfEnabled() {
+        guard exportUsageJSON else { return }
+        guard !quotas.isEmpty else { return }
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        guard let data = UsageExporter.makeSnapshot(
+            version: version,
+            quotas: quotas,
+            extraUsage: extraUsage,
+            activeSessionRunning: isSessionActive,
+            activeSessionCost: activeSessionCost,
+            activeSessionMessages: activeSessionMessages,
+            today: todayStats,
+            month: monthStats,
+            monthlyForecast: monthlyForecast,
+            credentialSource: credentialSource.rawValue
+        ) else { return }
+        DispatchQueue.global(qos: .utility).async {
+            UsageExporter.writeSnapshot(data)
+        }
     }
 
     // MARK: - Countdown

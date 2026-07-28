@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.25.0] - 2026-07-28
+
+### Added
+- **JSON usage export** (`~/.claude-god/usage.json`) — new opt-in toggle in Settings → Integrations writes a full snapshot (all quotas, extra usage, today/month costs, monthly forecast, active session, credential source) after every OAuth refresh and stats reload. Consumers can read a single well-known file instead of scraping the OAuth API themselves, enabling tmux / i3blocks / dashboard integrations without any special access. Includes a convenience `primary` object with the headline session/weekly percentage so simple scripts don't have to iterate the quotas array. Written atomically off the main queue.
+- **Claude Code statusline integration** — Settings → Integrations now offers a one-click install for `~/.claude-god/statusline.sh`, a small Python script (dependency-free, only needs system `python3`) that reads the exported JSON and prints a colored one-line `session 39% · 4h 8m · weekly 60% · $0.03 today` suitable for Claude Code's `statusLine` setting. Installing also opts the user into JSON export automatically since the two go together. The Settings pane shows the exact snippet to paste into `~/.claude/settings.json` with a Copy button, and a Reveal-in-Finder shortcut for the JSON file.
+- **Notarized release pipeline** — `.github/workflows/build.yml` now detects the presence of Apple Developer Program secrets and transparently upgrades from ad-hoc signing to full Developer ID signing + notarization + stapling of both the `.app` and the `.dmg`. When the secrets are absent the workflow falls back to the previous ad-hoc build exactly as before, so nothing regresses. See [docs/NOTARIZATION.md](docs/NOTARIZATION.md) for the six GitHub secrets to configure. Once wired, first-launch users no longer see the "Apple cannot check it for malicious software" dialog and the `xattr -cr` step disappears from the install instructions.
+
 ## [2.24.3] - 2026-07-27
 
 ### Fixed

@@ -11,6 +11,16 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    env:
+      # Notarization is opt-in. If any of the four secrets below is missing,
+      # the workflow builds an ad-hoc-signed DMG exactly like before (users
+      # still have to `xattr -cr` on first launch). Once all four are set,
+      # the DMG is Developer-ID signed and notarized so Gatekeeper accepts
+      # it silently. See docs/NOTARIZATION.md for setup.
+      DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -23,10 +33,65 @@ jobs:
       - name: Verify Info.plist after xcodegen
         run: cat Sources/Info.plist
 
+      - name: Determine signing mode
+        id: signing
+        run: |
+          if [ -n "$DEVELOPER_ID_APPLICATION" ] && [ -n "${{ secrets.APPLE_CERT_P12_BASE64 }}" ] \
+             && [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_PASSWORD" ]; then
+            echo "mode=notarized" >> "$GITHUB_OUTPUT"
+            echo "notarize=true"  >> "$GITHUB_OUTPUT"
+            echo "🔐 Notarized signing enabled ($DEVELOPER_ID_APPLICATION)"
+          else
+            echo "mode=adhoc"     >> "$GITHUB_OUTPUT"
+            echo "notarize=false" >> "$GITHUB_OUTPUT"
+            echo "⚠ Notarization secrets not set — falling back to ad-hoc signing (users will need xattr -cr)"
+          fi
+
+      - name: Import Developer ID certificate
+        if: steps.signing.outputs.notarize == 'true'
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # Prepend to search list so codesign finds the identity
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+          rm -f "$CERT_PATH"
+
       - name: Build app
+        env:
+          SIGN_MODE: ${{ steps.signing.outputs.mode }}
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          echo "Building version: $VERSION"
+          echo "Building version: $VERSION ($SIGN_MODE)"
+          if [ "$SIGN_MODE" = "notarized" ]; then
+            SIGN_ARGS=(
+              "CODE_SIGN_IDENTITY=$DEVELOPER_ID_APPLICATION"
+              "CODE_SIGN_STYLE=Manual"
+              "CODE_SIGNING_REQUIRED=YES"
+              "CODE_SIGNING_ALLOWED=YES"
+              "OTHER_CODE_SIGN_FLAGS=--timestamp --options=runtime"
+            )
+          else
+            SIGN_ARGS=(
+              "CODE_SIGN_IDENTITY=-"
+              "CODE_SIGNING_REQUIRED=NO"
+              "CODE_SIGNING_ALLOWED=NO"
+            )
+          fi
           xcodebuild \
             -project ClaudeGod.xcodeproj \
             -scheme ClaudeGod \
@@ -34,29 +99,67 @@ jobs:
             -derivedDataPath build \
             ARCHS="arm64 x86_64" \
             ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
+            "${SIGN_ARGS[@]}" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}"
+
+      - name: Notarize app
+        if: steps.signing.outputs.notarize == 'true'
+        run: |
+          set -euo pipefail
+          APP_PATH="build/Build/Products/Release/Claude God.app"
+          ZIP_PATH="$RUNNER_TEMP/ClaudeGod-notarize.zip"
+
+          # notarytool wants a zip (not a folder or DMG) for submission
+          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+
+          echo "Submitting to Apple notary service..."
+          xcrun notarytool submit "$ZIP_PATH" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait \
+            --timeout 30m
+
+          echo "Stapling notarization ticket to the .app..."
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
 
       - name: Create DMG
         run: |
           APP_PATH="build/Build/Products/Release/Claude God.app"
           DMG_NAME="ClaudeGod.dmg"
 
-          # Create a temporary directory for the DMG contents
           mkdir -p dmg-contents
           cp -R "$APP_PATH" dmg-contents/
           ln -s /Applications dmg-contents/Applications
 
-          # Create DMG
           hdiutil create \
             -volname "Claude God" \
             -srcfolder dmg-contents \
             -ov \
             -format UDZO \
             "$DMG_NAME"
+
+      - name: Notarize DMG
+        if: steps.signing.outputs.notarize == 'true'
+        run: |
+          set -euo pipefail
+          # Sign the DMG itself, then notarize + staple it so users who
+          # download the DMG directly (not via Homebrew) also get a clean
+          # first-launch experience without any Gatekeeper prompt.
+          codesign --force --sign "$DEVELOPER_ID_APPLICATION" --timestamp ClaudeGod.dmg
+
+          echo "Submitting DMG to notary service..."
+          xcrun notarytool submit ClaudeGod.dmg \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait \
+            --timeout 30m
+
+          xcrun stapler staple ClaudeGod.dmg
+          xcrun stapler validate ClaudeGod.dmg
 
       - name: Extract changelog for this version
         id: changelog
@@ -67,7 +170,11 @@ jobs:
             BODY="See [CHANGELOG.md](https://github.com/Lcharvol/Claude-God/blob/main/CHANGELOG.md) for details."
           fi
           echo "$BODY" > /tmp/release-body.md
-          printf '\n---\n\n## Install\n\n**Homebrew (recommended)**\n```bash\nbrew tap lcharvol/tap\nbrew install --cask claude-god\n```\n\n**Manual** — download `ClaudeGod.dmg` below, drag to Applications, then run:\n```bash\nxattr -cr /Applications/Claude\\ God.app\n```\n' >> /tmp/release-body.md
+          if [ "${{ steps.signing.outputs.notarize }}" = "true" ]; then
+            printf '\n---\n\n## Install\n\n**Homebrew (recommended)**\n```bash\nbrew tap lcharvol/tap\nbrew install --cask claude-god\n```\n\n**Manual** — download `ClaudeGod.dmg` below and drag to Applications. Signed & notarized: no `xattr` needed.\n' >> /tmp/release-body.md
+          else
+            printf '\n---\n\n## Install\n\n**Homebrew (recommended)**\n```bash\nbrew tap lcharvol/tap\nbrew install --cask claude-god\n```\n\n**Manual** — download `ClaudeGod.dmg` below, drag to Applications, then run:\n```bash\nxattr -cr /Applications/Claude\\ God.app\n```\n' >> /tmp/release-body.md
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

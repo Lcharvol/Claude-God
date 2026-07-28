@@ -124,7 +124,7 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
     <style>
         :root {
@@ -910,9 +910,197 @@
             .oss-actions div { flex-direction: column !important; gap: 0.75rem !important; }
             .oss-actions .btn { font-size: 0.82rem; }
         }
+
+        /* ============================================
+           LANDING v2 — fake menubar, serif italic accents,
+           hero callouts, manifesto, film grain
+           ============================================ */
+
+        /* Serif italic used for emphasis on headings */
+        .serif, em.serif, h1 em, .section-title em, .manifesto em, .hero-eyebrow em {
+            font-family: 'Instrument Serif', 'Iowan Old Style', 'Palatino', serif;
+            font-style: italic;
+            font-weight: 400;
+            letter-spacing: -0.01em;
+        }
+
+        /* --- Grain overlay for warmth --- */
+        .grain {
+            position: fixed; inset: 0;
+            pointer-events: none;
+            z-index: 90;
+            opacity: 0.06;
+            mix-blend-mode: overlay;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+        }
+
+        /* --- Signature: animated Apple-Watch-style rings --- */
+        .rings-hero {
+            position: relative;
+            width: 100%;
+            max-width: 520px;
+            aspect-ratio: 1;
+            margin: 3.5rem auto 0;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .rings-hero::before {
+            content: "";
+            position: absolute; inset: -10%;
+            background:
+                radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.18), transparent 60%),
+                radial-gradient(ellipse at 70% 70%, rgba(52,211,153,0.10), transparent 60%);
+            filter: blur(60px);
+            z-index: -1;
+            pointer-events: none;
+        }
+        .rings-svg { width: 100%; height: 100%; overflow: visible; }
+        .rings-svg circle.track {
+            fill: none;
+            stroke: rgba(255,255,255,0.05);
+            stroke-width: 22;
+        }
+        .rings-svg circle.progress {
+            fill: none;
+            stroke-width: 22;
+            stroke-linecap: round;
+            transform: rotate(-90deg);
+            transform-origin: center;
+            transition: stroke-dashoffset 1.8s cubic-bezier(0.22, 1, 0.36, 1);
+            filter: drop-shadow(0 0 12px currentColor);
+        }
+        .rings-center {
+            position: absolute;
+            inset: 0;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 2px;
+            pointer-events: none;
+        }
+        .rings-center .label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+        }
+        .rings-center .value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 2.4rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            color: var(--text);
+            letter-spacing: -0.02em;
+            line-height: 1;
+        }
+        .rings-center .value em {
+            font-family: 'Instrument Serif', serif;
+            font-style: italic;
+            font-weight: 400;
+            color: var(--accent);
+        }
+        .rings-center .sub {
+            font-size: 0.78rem;
+            color: var(--text-2);
+            margin-top: 4px;
+        }
+        .rings-legend {
+            display: flex; justify-content: center; gap: 1.5rem;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+        }
+        .rings-legend .item {
+            display: inline-flex; align-items: center; gap: 8px;
+            font-size: 0.82rem;
+            color: var(--text-2);
+        }
+        .rings-legend .swatch {
+            width: 10px; height: 10px; border-radius: 50%;
+        }
+        .rings-legend .num {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            color: var(--text);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* --- Hero v2 --- */
+        .hero-eyebrow {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 6px 14px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-2);
+            margin-bottom: 1.75rem;
+        }
+        .hero-eyebrow .pulse-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5);
+            animation: pulseDot 1.8s infinite;
+        }
+        @keyframes pulseDot {
+            70% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+        }
+
+        .hero-fineprint {
+            margin-top: 1.25rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+            color: var(--muted);
+        }
+        .hero-fineprint .sep { opacity: 0.4; margin: 0 0.5em; }
+
+        /* --- Signature quote strip (replaces the manifesto) --- */
+        .quote-strip {
+            padding: 5rem 2rem;
+            text-align: center;
+            position: relative;
+        }
+        .quote-strip .mark {
+            font-family: 'Instrument Serif', serif;
+            font-style: italic;
+            font-size: 4rem;
+            color: var(--accent);
+            opacity: 0.35;
+            line-height: 0;
+            display: inline-block;
+            transform: translateY(28px);
+        }
+        .quote-strip p {
+            font-size: clamp(1.25rem, 2.4vw, 1.9rem);
+            max-width: 720px;
+            margin: 0.5rem auto 1rem;
+            color: var(--text);
+            font-weight: 500;
+            line-height: 1.4;
+        }
+        .quote-strip cite {
+            display: block;
+            font-style: normal;
+            font-size: 0.85rem;
+            color: var(--muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Bump H1 with serif italic emphasis */
+        h1 em {
+            color: var(--accent);
+        }
+
+        /* Section titles: allow serif italic in em spans */
+        .section-title em {
+            color: var(--accent);
+            font-weight: 400;
+        }
     </style>
 </head>
 <body itemscope itemtype="https://schema.org/WebPage">
+
+<!-- FILM GRAIN -->
+<div class="grain" aria-hidden="true"></div>
 
 <!-- NAV -->
 <nav id="nav">
@@ -945,19 +1133,20 @@
     <div class="hero-grid"></div>
 
     <div class="hero-content">
-        <div class="hero-badge">
-            <span class="dot"></span>
-            Free &middot; Open Source &middot; macOS 13+
-        </div>
+        <p class="hero-eyebrow">
+            <span class="pulse-dot"></span>
+            Free &amp; open source &middot; universal binary &middot; macOS 13+
+        </p>
 
         <h1>
-            Your Claude usage,<br>
-            <span class="gradient">always visible.</span>
+            Every Claude limit,<br>
+            <em>three rings deep.</em>
         </h1>
 
         <p class="hero-sub">
-            A native macOS menu bar app that tracks your Claude AI rate limits, usage quotas, costs,
-            and session history in real time. Works with Claude Pro, Max &amp; Team plans — no API key needed.
+            Session, weekly, per-model, API dollar. All of it &mdash; live from the top of your Mac,
+            in three concentric rings you can read without opening anything.
+            Native SwiftUI. No API key. No cloud.
         </p>
 
         <div class="hero-install">
@@ -978,9 +1167,44 @@
             </a>
         </div>
 
-        <p class="hero-note">
-            <strong>Pure SwiftUI.</strong> Circular gauges, sparkline charts, CSV export. No Electron. Free &amp; open source.
+        <p class="hero-fineprint">
+            <span id="hero-fp-version">v2.24.3</span>
+            <span class="sep">·</span> universal (Intel + Apple Silicon)
+            <span class="sep">·</span> MIT
+            <span class="sep">·</span> no account
+            <span class="sep">·</span> no cloud sync
         </p>
+    </div>
+
+    <!-- Signature visual: animated Apple-Watch-style rings -->
+    <div class="rings-hero" role="img" aria-label="Three concentric activity rings showing session, weekly, and Opus quota usage">
+        <svg class="rings-svg" viewBox="0 0 320 320">
+            <!-- Ring 3 (outer): Weekly · orange -->
+            <circle class="track" cx="160" cy="160" r="140"/>
+            <circle class="progress" id="ring-weekly" cx="160" cy="160" r="140"
+                    stroke="#fb923c"
+                    stroke-dasharray="879.6" stroke-dashoffset="879.6"/>
+            <!-- Ring 2 (middle): Session · green -->
+            <circle class="track" cx="160" cy="160" r="110"/>
+            <circle class="progress" id="ring-session" cx="160" cy="160" r="110"
+                    stroke="#34d399"
+                    stroke-dasharray="691.2" stroke-dashoffset="691.2"/>
+            <!-- Ring 1 (inner): Opus · purple -->
+            <circle class="track" cx="160" cy="160" r="80"/>
+            <circle class="progress" id="ring-opus" cx="160" cy="160" r="80"
+                    stroke="#a78bfa"
+                    stroke-dasharray="502.6" stroke-dashoffset="502.6"/>
+        </svg>
+        <div class="rings-center">
+            <span class="label">Session</span>
+            <span class="value" id="rings-value">39<em>%</em></span>
+            <span class="sub"><span id="rings-eta">4h 08m</span> to reset</span>
+        </div>
+    </div>
+    <div class="rings-legend">
+        <span class="item"><span class="swatch" style="background:#a78bfa"></span> Opus <span class="num" id="legend-opus">12%</span></span>
+        <span class="item"><span class="swatch" style="background:#34d399"></span> Session <span class="num" id="legend-session">39%</span></span>
+        <span class="item"><span class="swatch" style="background:#fb923c"></span> Weekly <span class="num" id="legend-weekly">60%</span></span>
     </div>
 
     <!-- Screenshots -->
@@ -1018,7 +1242,7 @@
 <section class="section" id="features">
     <div class="section-inner reveal">
         <p class="section-label">Features</p>
-        <h2 class="section-title">Track Claude AI usage,<br>costs &amp; rate limits</h2>
+        <h2 class="section-title">Everything Claude sees.<br>In your menu bar.</h2>
         <p class="section-desc">Real-time quota gauges, cost analytics, session timeline, sparkline charts, and CSV export. All in a lightweight native macOS app.</p>
 
         <div class="features-grid">
@@ -1089,11 +1313,18 @@
     </div>
 </section>
 
+<!-- QUOTE STRIP -->
+<section class="quote-strip" aria-label="Philosophy">
+    <span class="mark" aria-hidden="true">&ldquo;</span>
+    <p>Built by someone who ran out of Opus at 3&#8239;p.m. one too many times.<br>Every screen exists to prevent that specific moment.</p>
+    <cite>— the whole point of Claude God</cite>
+</section>
+
 <!-- HOW IT WORKS -->
 <section class="section" id="setup" style="padding-top: 2rem;">
     <div class="section-inner reveal">
         <p class="section-label">Setup</p>
-        <h2 class="section-title">Ready in 30 seconds</h2>
+        <h2 class="section-title">Running in 30 seconds.</h2>
         <p class="section-desc">One Homebrew command, no API key needed.</p>
 
         <div class="how-grid">
@@ -1167,7 +1398,7 @@
 <section class="section" id="faq" style="padding-top:2rem">
     <div class="section-inner reveal">
         <p class="section-label">FAQ</p>
-        <h2 class="section-title">Frequently asked questions</h2>
+        <h2 class="section-title">Frequently asked.</h2>
         <div style="max-width:680px;margin:0 auto;text-align:left">
             <details style="border-bottom:1px solid var(--border);padding:1rem 0">
                 <summary style="cursor:pointer;font-weight:600;color:var(--text);font-size:0.95rem">How do I check my Claude AI rate limits?</summary>
@@ -1536,6 +1767,39 @@
             }
         })
         .catch(() => {});
+
+    // Signature rings animation — fill in on load, then cycle through Opus / Session / Weekly
+    (function() {
+        const rings = [
+            { id: 'ring-opus',    circumference: 502.6, label: 'Opus',    color: '#a78bfa', pct: 12 },
+            { id: 'ring-session', circumference: 691.2, label: 'Session', color: '#34d399', pct: 39 },
+            { id: 'ring-weekly',  circumference: 879.6, label: 'Weekly',  color: '#fb923c', pct: 60 },
+        ];
+        const centerLabel = document.querySelector('.rings-center .label');
+        const centerValue = document.getElementById('rings-value');
+        const centerSub   = document.getElementById('rings-eta');
+
+        function setRing(r) {
+            const el = document.getElementById(r.id);
+            if (!el) return;
+            const offset = r.circumference * (1 - r.pct / 100);
+            el.setAttribute('stroke-dashoffset', offset);
+        }
+        rings.forEach(setRing);
+
+        // Cycle the center label across the three rings so all three feel "the featured one"
+        const subFor = { Opus: 'this week', Session: '4h 08m to reset', Weekly: '3d 23h to reset' };
+        let i = 1; // start on Session (matches initial render)
+        setInterval(() => {
+            i = (i + 1) % rings.length;
+            const r = rings[i];
+            if (!centerValue) return;
+            centerLabel.textContent = r.label;
+            centerLabel.style.color = r.color;
+            centerValue.innerHTML = r.pct + '<em>%</em>';
+            centerSub.textContent = subFor[r.label] || '';
+        }, 2600);
+    })();
 
     fetch('https://api.github.com/repos/Lcharvol/Claude-God/releases')
         .then(r => r.json())

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.25.1] - 2026-07-28
+
+### Fixed
+- **Daily forced `claude /login` caused by Claude God consuming the CLI's refresh token** — Claude God ran a background token-health timer every 30 minutes that proactively called the OAuth `refresh_token` grant whenever the access token had under an hour left. Because Claude Code's refresh token is **single-use** and shared with the CLI, spending it here immediately invalidated the CLI's in-memory copy — the next `claude` command would 401 and force a re-login. On top of the timer, `refreshInternal` also fell back to the same self-refresh path when a reloaded token was still expired, and both write locations then created an account-less `Claude Code-credentials` Keychain entry next to Claude Code's own. Removed the proactive timer, removed the self-refresh fallback, and deleted `selfRefreshToken` + `persistRefreshedCredentials` from `AuthManager` so no future path can regress this. When our access token expires we now reload from disk/Keychain (which picks up any refresh Claude Code has done on its own), and otherwise surface "Session expired — run `claude auth login`" — exactly as the pre-existing comment at `AuthManager.swift:31-35` already prescribed ([#40](https://github.com/Lcharvol/Claude-God/issues/40), thanks @RobinMobers97 for the precise write-up)
+
 ## [2.25.0] - 2026-07-28
 
 ### Added

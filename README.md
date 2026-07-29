@@ -164,6 +164,9 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.25.1
+- **Fixed**: Daily forced `claude /login` — Claude God's background token-health timer + a `refreshInternal` fallback were consuming Claude Code's single-use OAuth refresh token, invalidating the CLI's in-memory copy every ~24h. Removed both paths and deleted `selfRefreshToken`/`persistRefreshedCredentials` from `AuthManager` so no future path can regress this. Claude God now only reads credentials; when its token expires it reloads from disk/Keychain (picking up any refresh Claude Code did itself) and otherwise surfaces "Session expired — run `claude auth login`" ([#40](https://github.com/Lcharvol/Claude-God/issues/40), thanks @RobinMobers97)
+
 ### v2.25.0
 - **Added**: JSON usage export — opt-in toggle writes a full snapshot to `~/.claude-god/usage.json` after every refresh, so tmux/i3blocks/dashboards can read live Claude usage without hitting the OAuth API themselves
 - **Added**: Claude Code statusline integration — one-click install a helper script that prints `session · weekly · today` colored inside every Claude Code prompt via the `statusLine` setting

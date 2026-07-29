@@ -828,11 +828,8 @@ class UsageManager: ObservableObject {
     private var autoRefreshTimer: AnyCancellable?
     private var activeSessionTimer: AnyCancellable?
     private var reconnectPollTimer: AnyCancellable?
-    private var tokenHealthTimer: AnyCancellable?
     private var expiredCredentialTimer: AnyCancellable?
     private var cancellables = Set<AnyCancellable>()
-    private var isRefreshingToken = false
-    private var tokenRefreshQueue: [(Bool) -> Void] = [] // queued callbacks for concurrent refresh requests
     private var statsWorkItem: DispatchWorkItem?
     private var timelineWorkItem: DispatchWorkItem?
     private var roiWorkItem: DispatchWorkItem?
@@ -970,7 +967,6 @@ class UsageManager: ObservableObject {
         setupAutoRefresh()
         setupActiveSessionDetection()
         setupWakeObserver()
-        setupTokenHealthTimer()
         isGitAvailable = GitAnalyzer.isGitAvailable()
 
         if notificationsEnabled {
@@ -1426,68 +1422,12 @@ class UsageManager: ObservableObject {
             return
         }
 
-        if auth.tokenNeedsRefresh && auth.refreshToken != nil {
-            isLoading = true
-            loadingStartedAt = Date()
-            errorMessage = nil
-            if isRefreshingToken {
-                // Already refreshing — queue this request to avoid duplicate token refreshes
-                tokenRefreshQueue.append { [weak self] success in
-                    guard let self else { return }
-                    if success { self.fetchUsage() }
-                    else { self.finishLoading(error: "Session expired — run `claude auth login`") }
-                }
-                return
-            }
-            isRefreshingToken = true
-            var didComplete = false
-            let timeout = DispatchWorkItem { [weak self] in
-                guard let self, !didComplete else { return }
-                didComplete = true
-                Log.warn("Token refresh timed out after 10s")
-                self.isRefreshingToken = false
-                let queued = self.tokenRefreshQueue
-                self.tokenRefreshQueue.removeAll()
-                self.finishLoading(error: "Session expired — run `claude auth login`")
-                for callback in queued { callback(false) }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: timeout)
-            auth.reloadCredentials { [weak self] success in
-                guard let self, !didComplete else { return }
-
-                if success && !self.auth.tokenExpired {
-                    // Got a fresh token from file or Keychain (e.g. Claude Code refreshed it)
-                    timeout.cancel()
-                    didComplete = true
-                    self.isRefreshingToken = false
-                    let queued = self.tokenRefreshQueue
-                    self.tokenRefreshQueue.removeAll()
-                    self.fetchUsage()
-                    for callback in queued { callback(true) }
-                } else {
-                    // Token still expired — attempt silent self-refresh via OAuth refresh_token grant
-                    Log.info("Reloaded credentials still expired — attempting silent self-refresh")
-                    self.auth.selfRefreshToken { [weak self] refreshed in
-                        guard let self else { return }
-                        timeout.cancel()
-                        guard !didComplete else { return }
-                        didComplete = true
-                        self.isRefreshingToken = false
-                        let queued = self.tokenRefreshQueue
-                        self.tokenRefreshQueue.removeAll()
-                        if refreshed {
-                            self.fetchUsage()
-                            for callback in queued { callback(true) }
-                        } else {
-                            self.finishLoading(error: "Session expired — run `claude auth login`")
-                            for callback in queued { callback(false) }
-                        }
-                    }
-                }
-            }
-            return
-        }
-
+        // Never proactively refresh the OAuth token ourselves — the refresh
+        // token is single-use and shared with the Claude Code CLI, so consuming
+        // it here invalidates the CLI's in-memory token and forces the user to
+        // /login again (see issue #40). If the token is stale we reload from
+        // disk/Keychain in case Claude Code has since refreshed it; otherwise
+        // fetchUsage will surface "Session expired — run `claude auth login`".
         isLoading = true
         loadingStartedAt = Date()
         errorMessage = nil
@@ -1858,28 +1798,6 @@ class UsageManager: ObservableObject {
         .sink { [weak self] _ in
             self?.autoRefresh()
         }
-    }
-
-    // MARK: - Proactive token health
-
-    /// Fires every 30 minutes. If the access token expires within the next hour,
-    /// silently self-refreshes via the OAuth refresh_token grant so the app
-    /// stays online without user intervention.
-    private func setupTokenHealthTimer() {
-        tokenHealthTimer?.cancel()
-        tokenHealthTimer = Timer.publish(every: 30 * 60, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                guard let self, self.isAuthenticated else { return }
-                guard let expiresAt = self.auth.tokenExpiresAt else { return }
-                let expiresDate = Date(timeIntervalSince1970: expiresAt / 1000)
-                let timeUntilExpiry = expiresDate.timeIntervalSinceNow
-                guard timeUntilExpiry < 3600 && !self.auth.tokenExpired else { return }
-                Log.info("Token health: expires in \(Int(timeUntilExpiry / 60))min — proactively refreshing")
-                self.auth.selfRefreshToken { success in
-                    Log.info("Proactive token refresh: \(success ? "succeeded" : "failed")")
-                }
-            }
     }
 
     // MARK: - Wake observer

@@ -1773,6 +1773,15 @@
         <div style="max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:1px;background:var(--border);border-radius:16px;overflow:hidden;border:1px solid var(--border)">
             <div style="background:var(--card);padding:1.5rem">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                    <span style="font-weight:700;font-size:1rem">v2.25.1</span>
+                    <span style="font-size:0.75rem;color:var(--muted)">2026-07-28</span>
+                </div>
+                <p style="color:var(--text-2);font-size:0.88rem;margin:0;line-height:1.5">
+                    <strong style="color:var(--accent)">Fixed:</strong> Daily forced <code>claude /login</code> &mdash; Claude God's background token-health timer + a <code>refreshInternal</code> fallback were consuming Claude Code's single-use OAuth refresh token, invalidating the CLI's in-memory copy every ~24h. Removed both paths and deleted the self-refresh code entirely so no future path can regress this.
+                </p>
+            </div>
+            <div style="background:var(--card);padding:1.5rem">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
                     <span style="font-weight:700;font-size:1rem">v2.25.0</span>
                     <span style="font-size:0.75rem;color:var(--muted)">2026-07-28</span>
                 </div>

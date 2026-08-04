@@ -99,6 +99,11 @@ struct MenuBarView: View {
                         loadingView
                     } else if let error = manager.errorMessage {
                         errorView(error)
+                    // Intentionally `extraUsage != nil` and not `extraUsageQuota != nil`:
+                    // the latter also requires isEnabled + a non-nil utilization, but the
+                    // Extra Usage card still has something useful to show (an On/Off badge,
+                    // spend to date) when those are absent. Narrowing this would send
+                    // extra-usage-only accounts back to the empty state.
                     } else if !manager.quotas.isEmpty || manager.extraUsage != nil {
                         if manager.compactMode {
                             compactUsageView
@@ -1105,6 +1110,40 @@ struct MenuBarView: View {
                 .padding(.vertical, 3)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(quota.label), \(Int(quota.utilization)) percent used")
+            }
+
+            // Extra usage — mirrors the full view's card, since accounts with a dollar
+            // budget may have no token quotas at all and would otherwise see nothing here.
+            if let extra = manager.extraUsage {
+                HStack(spacing: 6) {
+                    Text("Extra usage")
+                        .shFont(11, weight: .medium)
+                        .foregroundColor(.secondary)
+                    Spacer()
+
+                    if let util = extra.utilization {
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Theme.muted)
+                                .frame(width: 44, height: 4)
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(UsageLevel(utilization: util).color)
+                                .frame(width: 44 * CGFloat(min(util, 100) / 100), height: 4)
+                        }
+                        .accessibilityHidden(true)
+
+                        Text(formatUtilization(util))
+                            .shFont(11, weight: .bold, design: .monospaced)
+                            .foregroundColor(UsageLevel(utilization: util).color)
+                            .frame(width: 38, alignment: .trailing)
+                    } else {
+                        SHBadge(text: extra.isEnabled ? "On" : "Off",
+                                color: extra.isEnabled ? .green : .secondary)
+                    }
+                }
+                .padding(.vertical, 3)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Extra usage\(extra.utilization.map { ", \(Int($0)) percent used" } ?? ", \(extra.isEnabled ? "on" : "off")")")
             }
 
             if let prediction = manager.burnRatePrediction {

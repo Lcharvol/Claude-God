@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.25.2] - 2026-08-04
+
+### Fixed
+- **Usage tab blank for enterprise accounts with a dollar budget but no token quotas** — the tab gated its whole render on `!manager.quotas.isEmpty`, so accounts whose plan exposes extra usage (a monthly dollar limit) without any token quota fell through to the "Click Refresh to load data" empty state and never saw their Extra Usage card. The extra-usage-% work routed the menu bar, rings and alerts through `allNotifiableQuotas` (which merges in the synthesized extra-usage quota) but left this one gate keyed on the raw `quotas` array; such accounts likely only ever rendered because the API returned an incidental token quota that later went away. The gate now also admits `extraUsage != nil` ([#42](https://github.com/Lcharvol/Claude-God/pull/42), thanks @ecoffey for the diagnosis and fix)
+- **Extra usage missing entirely from compact mode** — `compactUsageView` only ever rendered `manager.quotas`, so the fix above would have shown extra-usage-only accounts a panel containing nothing but "Next reset" and the peak-hours row. Compact mode now renders an Extra Usage line mirroring the full view: a percentage bar when a monthly limit is set, an On/Off badge otherwise
+
 ## [2.25.1] - 2026-07-28
 
 ### Fixed

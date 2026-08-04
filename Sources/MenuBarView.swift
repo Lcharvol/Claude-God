@@ -99,7 +99,7 @@ struct MenuBarView: View {
                         loadingView
                     } else if let error = manager.errorMessage {
                         errorView(error)
-                    } else if !manager.quotas.isEmpty {
+                    } else if !manager.quotas.isEmpty || manager.extraUsage != nil {
                         if manager.compactMode {
                             compactUsageView
                         } else {

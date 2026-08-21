@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.25.3] - 2026-08-21
+
+### Fixed
+- **Menu bar never turned green, and its text was never colored at all** — `menuBarIconColor` returned `.primary` for the `.good` level, so the green state advertised in the README simply didn't exist: under 50% usage the icon rendered in the system color (white on a dark menu bar) and only orange (≥ 50%) and red (≥ 80%) were ever tinted. Digging in surfaced a second, wider bug the reporter had suspected: `Text(menuBarTitle)` carried no `foregroundStyle`, so even at 85% a red icon sat next to a plain white `85% · 2h31m`. That affected every text mode — Session, Timer, All and Session+Week — not just Timer. Icon and text now share a single `menuBarTint` driven by the worst quota's level ([#44](https://github.com/Lcharvol/Claude-God/issues/44), thanks @egorovartem-alt)
+
+### Added
+- **"Color by usage level" toggle** in Settings → Menu bar (default on). The `.primary` fallback removed above was a deliberate contrast choice for light menu bars, so the monochrome look stays available for anyone who preferred it. The warning-state opacity hint (0.7) now applies only in monochrome mode — with color carrying that signal, dimming orange only cost legibility
+
 ## [2.25.2] - 2026-08-04
 
 ### Fixed

@@ -164,6 +164,10 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.25.3
+- **Fixed**: Menu bar never turned green — `menuBarIconColor` returned `.primary` under 50% usage, so only orange (≥ 50%) and red (≥ 80%) were ever tinted and the green state the README advertised didn't exist. The menu bar *text* was also never colored in any mode, so even at 85% a red icon sat next to a plain white `85% · 2h31m`. Icon and text now share one tint driven by the worst quota ([#44](https://github.com/Lcharvol/Claude-God/issues/44), thanks @egorovartem-alt)
+- **Added**: "Color by usage level" toggle in Settings → Menu bar (default on) — the removed `.primary` fallback was a deliberate contrast choice for light menu bars, so monochrome stays available
+
 ### v2.25.2
 - **Fixed**: Usage tab was blank for enterprise accounts with a dollar budget but no token quotas — the tab gated rendering solely on `!quotas.isEmpty`, so these accounts hit the "Click Refresh" empty state instead of their Extra Usage card. The menu bar, rings and alerts already handled this via `allNotifiableQuotas`; the tab was the last surface still keyed on raw `quotas` ([#42](https://github.com/Lcharvol/Claude-God/pull/42), thanks @ecoffey)
 - **Fixed**: Compact mode never rendered extra usage at all, so the same accounts would have seen an almost-empty panel. It now shows an Extra Usage line — percentage bar when a monthly limit exists, On/Off badge otherwise

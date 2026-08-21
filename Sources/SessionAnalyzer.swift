@@ -30,6 +30,7 @@ enum UDKey {
     static let ringStatLabels = "ringStatLabels"
     static let exportUsageJSON = "exportUsageJSON"
     static let statuslineInstalled = "statuslineInstalled"
+    static let coloredMenuBar = "coloredMenuBar"
 }
 
 // MARK: - Logging

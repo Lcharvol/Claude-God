@@ -558,6 +558,15 @@ struct MenuBarView: View {
                     Text(manager.menuBarDisplayMode.description)
                         .shFont(11, weight: .medium, design: .monospaced)
                         .foregroundColor(.secondary)
+
+                    SHDivider()
+                    Toggle("Color by usage level", isOn: $manager.coloredMenuBar)
+                        .shFont(12)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    Text("Tints the icon and text green under 50%, orange under 80%, red above.")
+                        .shFont(11)
+                        .foregroundColor(.secondary)
                 }
             }
 

@@ -28,7 +28,7 @@ struct ClaudeGodApp: App {
                 } else {
                     Image(systemName: manager.menuBarIcon)
                         .symbolRenderingMode(.palette)
-                        .foregroundStyle(manager.menuBarIconColor.opacity(manager.menuBarIconOpacity))
+                        .foregroundStyle(manager.menuBarTint.opacity(manager.menuBarIconOpacity))
                 }
                 if manager.isSessionActive {
                     Circle()
@@ -38,6 +38,7 @@ struct ClaudeGodApp: App {
                 if !manager.menuBarTitle.isEmpty {
                     Text(manager.menuBarTitle)
                         .monospacedDigit()
+                        .foregroundStyle(manager.menuBarTint)
                 }
             }
         }

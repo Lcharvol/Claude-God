@@ -45,7 +45,7 @@
 | | Feature | Description |
 |---|---|---|
 | **Quotas** | Progress bars | Animated bars for session (5h), weekly, Sonnet & Opus quotas |
-| | Dynamic icon | Menu bar icon turns green/orange/red based on worst quota |
+| | Dynamic icon | Menu bar icon and text turn green/orange/red based on worst quota (toggle in Settings) |
 | | Live countdown | Real-time timer showing when quotas reset |
 | | Burn rate | Predicts when you'll hit the limit based on current velocity |
 | | Model advisor | Smart tips when quota imbalance is detected |

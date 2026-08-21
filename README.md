@@ -164,6 +164,11 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.25.4
+- **Fixed**: The app got permanently stuck once you stopped running `claude` in a terminal — v2.25.1 made it a pure credential reader, counting on the CLI to keep refreshing the shared Keychain entry, which the Claude desktop app never touches. The token expired, nothing revived it, and the popover showed "Rate limited" over a `401 token has expired`. `recoverSession()` now reloads disk/Keychain first and only spends the shared refresh token once the access token has been dead 12h — long enough that no running CLI can still hold it, so [#40](https://github.com/Lcharvol/Claude-God/issues/40) stays fixed ([#46](https://github.com/Lcharvol/Claude-God/pull/46))
+- **Fixed**: An expired session was reported as "Rate limited — retrying in 30s", sending users to wait out a limit they never hit. A 429 on a known-expired token now triggers recovery, then says "Session expired" with the Sign In button
+- **Fixed**: Refreshed tokens are written back with `SecItemUpdate` on the exact entry they were read from. The old `security add-generic-password -U -a ""` write could not target Claude Code's account-less item and created a shadow entry beside it
+
 ### v2.25.3
 - **Fixed**: Menu bar never turned green — `menuBarIconColor` returned `.primary` under 50% usage, so only orange (≥ 50%) and red (≥ 80%) were ever tinted and the green state the README advertised didn't exist. The menu bar *text* was also never colored in any mode, so even at 85% a red icon sat next to a plain white `85% · 2h31m`. Icon and text now share one tint driven by the worst quota ([#44](https://github.com/Lcharvol/Claude-God/issues/44), thanks @egorovartem-alt)
 - **Added**: "Color by usage level" toggle in Settings → Menu bar (default on) — the removed `.primary` fallback was a deliberate contrast choice for light menu bars, so monochrome stays available

@@ -1773,6 +1773,18 @@
         <div style="max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:1px;background:var(--border);border-radius:16px;overflow:hidden;border:1px solid var(--border)">
             <div style="background:var(--card);padding:1.5rem">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                    <span style="font-weight:700;font-size:1rem">v2.25.4</span>
+                    <span style="font-size:0.75rem;color:var(--muted)">2026-08-21</span>
+                </div>
+                <p style="color:var(--text-2);font-size:0.88rem;margin:0;line-height:1.5">
+                    <strong style="color:var(--accent)">Fixed:</strong> The app could get stuck for good once you stopped running <code>claude</code> in a terminal &mdash; it only ever read credentials, counting on the CLI to keep the shared Keychain entry fresh, which the Claude desktop app never touches. It now recovers the session on its own once the stored token has been dead long enough that no CLI can still be using it.
+                </p>
+                <p style="color:var(--text-2);font-size:0.88rem;margin:0.5rem 0 0;line-height:1.5">
+                    <strong style="color:var(--accent)">Fixed:</strong> An expired session was reported as &ldquo;Rate limited&rdquo;, sending you to wait out a limit you never hit. It now says &ldquo;Session expired&rdquo; and offers Sign In.
+                </p>
+            </div>
+            <div style="background:var(--card);padding:1.5rem">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
                     <span style="font-weight:700;font-size:1rem">v2.25.3</span>
                     <span style="font-size:0.75rem;color:var(--muted)">2026-08-21</span>
                 </div>

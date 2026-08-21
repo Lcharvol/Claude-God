@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.25.4] - 2026-08-21
+
+### Fixed
+- **App permanently stuck on "Rate limited" / "Session expired" once you stop running `claude` in a terminal** — v2.25.1 made Claude God a pure credential *reader*, on the assumption that Claude Code would keep refreshing the shared `Claude Code-credentials` Keychain entry. That assumption silently fails for anyone who moved to the Claude desktop app: it keeps its own auth and never touches that entry, so the stored token expires and nothing ever revives it. Observed on a machine whose entry had not been written since three weeks earlier — the OAuth API answered `401 OAuth access token has expired` while the popover showed "Rate limited — retrying in 30s". A new `AuthManager.recoverSession()` now reloads disk/Keychain first (Claude Code may have refreshed since, and adopting its token costs nothing) and only spends the shared refresh token once the access token has been dead for **12 hours**. Claude Code rotates its credentials on any use, so an entry that stale belongs to no running CLI — which is what [#40](https://github.com/Lcharvol/Claude-God/issues/40) was really about: the deleted code refreshed *proactively* every 30 minutes and stomped on tokens the CLI still held in memory. Recovery is reactive only, `selfRefreshToken` is private behind that staleness gate, concurrent callers are coalesced onto a single grant, and a failure backs off for 5 minutes ([#46](https://github.com/Lcharvol/Claude-God/pull/46))
+- **An expired session reported as a rate limit** — a 429 answered on a token the app already knows is expired is an authentication artifact, not a quota limit, but it started a cooldown of up to 2h and told the user to wait for a limit they had never hit. Such a 429 now triggers session recovery, and if the token is still dead the popover says "Session expired" with its Sign In button. Genuine rate limits (real `Retry-After`, valid token) keep their previous behavior untouched
+- **Refreshed tokens could shadow Claude Code's own Keychain entry** — the write path deleted in v2.25.1 used `security add-generic-password -U -a ""`, and that CLI *requires* an account attribute while Claude Code's item carries none, so instead of updating the entry it created a second, account-less one next to it (as the v2.25.1 notes recorded). Any later read could then resolve to that shadow copy. The restored write goes through `SecItemUpdate` with the exact coordinates the credentials were read from, which updates in place or fails — it cannot create a duplicate. When it does fail (the item belongs to another app), the error is logged explicitly rather than swallowed
+
 ## [2.25.3] - 2026-08-21
 
 ### Fixed

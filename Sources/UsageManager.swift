@@ -485,6 +485,14 @@ class UsageManager: ObservableObject {
         }
     }
 
+    /// Tints the menu bar icon *and* text by usage level. Off falls back to the system
+    /// color, for users who prefer a monochrome menu bar.
+    @Published var coloredMenuBar: Bool {
+        didSet {
+            UserDefaults.standard.set(coloredMenuBar, forKey: UDKey.coloredMenuBar)
+        }
+    }
+
     @Published var dailyBudget: Double {
         didSet {
             UserDefaults.standard.set(dailyBudget, forKey: UDKey.dailyBudget)
@@ -598,22 +606,19 @@ class UsageManager: ObservableObject {
         }
     }
 
-    /// Secondary color hint for distinguishing warning (half-fill) from critical
+    /// Secondary hint distinguishing warning from critical when the menu bar is monochrome.
+    /// With tinting on, the color already carries that signal, so dimming only costs legibility.
     var menuBarIconOpacity: Double {
-        guard let q = worstQuota else { return 1.0 }
-        switch q.level {
-        case .critical: return 1.0
-        case .warning: return 0.7
-        case .good: return 1.0
-        }
+        guard !coloredMenuBar, let q = worstQuota else { return 1.0 }
+        return q.level == .warning ? 0.7 : 1.0
     }
 
-    var menuBarIconColor: Color {
-        guard let q = worstQuota else { return .primary }
-        switch q.level {
-        case .good: return .primary  // Use system color for contrast on light/dark menu bar
-        case .warning, .critical: return q.level.color
-        }
+    /// Usage-level tint applied to both the menu bar icon and its text, so the whole
+    /// label reads as one status indicator. `.primary` when tinting is off or no quota
+    /// has loaded yet — the system color keeps contrast on light and dark menu bars.
+    var menuBarTint: Color {
+        guard coloredMenuBar, let q = worstQuota else { return .primary }
+        return q.level.color
     }
 
     var nextResetDate: Date? {
@@ -862,6 +867,7 @@ class UsageManager: ObservableObject {
         self.windowHeight = savedHeight > 0 ? savedHeight : 650
         let savedDisplayMode = ud.integer(forKey: UDKey.menuBarDisplayMode)
         self.menuBarDisplayMode = MenuBarDisplayMode(rawValue: savedDisplayMode) ?? .percentageAndTimer
+        self.coloredMenuBar = ud.object(forKey: UDKey.coloredMenuBar) as? Bool ?? true
         self.dailyBudget = ud.double(forKey: UDKey.dailyBudget)
 
         // Load ring stat labels for Icon+ mode

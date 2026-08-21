@@ -7,6 +7,14 @@ import Security
 
 // MARK: - Credential source
 
+/// A resolved Keychain item: the credentials payload plus the coordinates it
+/// was read from, so a refreshed token can be written back to that same item.
+struct KeychainCredentials {
+    let service: String
+    let account: String?
+    let json: [String: Any]
+}
+
 enum CredentialSource: String {
     case file = "credentials.json"
     case keychain = "Keychain"
@@ -28,11 +36,26 @@ class AuthManager: ObservableObject {
 
     private var credentialsWatcher: DispatchSourceFileSystemObject?
 
-    // OAuth refresh is intentionally NOT done by this app. Claude Code owns
-    // the single-use refresh-token cycle; if we consume the token, the CLI's
-    // in-memory copy becomes stale and the user is forced to /login again on
-    // the next `claude` invocation. See issue #40 and the note further down
-    // where `selfRefreshToken` used to live.
+    /// The Keychain item credentials were last read from. Refreshed tokens are
+    /// written back to this exact (service, account) pair instead of a guessed
+    /// one, so we never shadow Claude Code's entry with a duplicate the app
+    /// would then read instead of the real thing.
+    private var keychainEntry: KeychainCredentials?
+    private var isSelfRefreshing = false
+    private var lastSelfRefreshFailure: Date?
+    /// Callers that asked for a refresh while one was already in flight — they all
+    /// get the same outcome instead of racing a second grant on the same token.
+    private var selfRefreshWaiters: [(Bool) -> Void] = []
+
+    // Refreshing OAuth tokens is Claude Code's job, not ours: the refresh token
+    // is single-use and shared with the CLI, so spending it while the CLI still
+    // holds the matching copy in memory forces the user to /login (issue #40).
+    // The single exception is a token that has been dead for `staleTokenGrace`
+    // — Claude Code rotates credentials on any use, so an entry that stale means
+    // no CLI is alive to be broken. Without that exception the app is bricked
+    // for anyone who stopped running `claude` in a terminal (the desktop app
+    // keeps its own auth and never touches this Keychain entry).
+    // `recoverSession` is the only entry point; see it below.
 
     static let credentialsPath: URL = {
         FileManager.default.homeDirectoryForCurrentUser
@@ -93,13 +116,16 @@ class AuthManager: ObservableObject {
 
         // Keychain — read off the main thread to avoid blocking UI.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let keychainJSON = Self.loadFromKeychain()
+            let keychainEntry = Self.loadFromKeychain()
             DispatchQueue.main.async {
                 guard let self else { return }
+                // Remember where the Keychain copy lives even when the file wins
+                // below — that item is still the one a refresh must write back to.
+                if let keychainEntry { self.keychainEntry = keychainEntry }
 
                 // Both sources may be stale; take whichever token lives longest.
                 let candidates: [([String: Any], CredentialSource)] = [
-                    keychainJSON.map { ($0, CredentialSource.keychain) },
+                    keychainEntry.map { ($0.json, CredentialSource.keychain) },
                     fileJSON.map { ($0, CredentialSource.file) }
                 ].compactMap { $0 }
 
@@ -149,12 +175,215 @@ class AuthManager: ObservableObject {
         resolveCredentials(completion: completion)
     }
 
-    // NOTE: There is no silent OAuth `refresh_token` grant in this app on purpose.
-    // Claude Code's refresh token is single-use and shared with the CLI: if we
-    // spent it, the CLI's in-memory token would 401 and force `/login` again
-    // (see issue #40). When our token expires we reload from disk/Keychain in
-    // case Claude Code has since refreshed it, and otherwise ask the user to
-    // run `claude auth login`.
+    // MARK: - Session recovery
+
+    private static let oauthTokenURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
+    private static let oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+
+    /// How long the stored access token must have been expired before this app may
+    /// spend the shared refresh token. Claude Code rotates credentials on any use,
+    /// so an entry dead this long belongs to no running CLI (issue #40).
+    private static let staleTokenGrace: TimeInterval = 12 * 3600
+
+    /// Cool-down after a failed self-refresh, so a broken refresh token is not
+    /// retried on every poll tick.
+    private static let selfRefreshRetryDelay: TimeInterval = 5 * 60
+
+    /// Whether silent recovery is on the table: a refresh token exists, the access
+    /// token has been dead longer than `staleTokenGrace`, and the last failure is
+    /// old enough to retry. Stays true while an attempt is in flight — callers use
+    /// this to decide whether to wait rather than prompt the user to sign in.
+    var canSelfRefresh: Bool {
+        if isSelfRefreshing { return true }
+        guard let refreshToken, !refreshToken.isEmpty,
+              let expiresAt = tokenExpiresAt else { return false }
+        let deadFor = Date().timeIntervalSince(Date(timeIntervalSince1970: expiresAt / 1000))
+        guard deadFor >= Self.staleTokenGrace else { return false }
+        guard let lastFailure = lastSelfRefreshFailure else { return true }
+        return Date().timeIntervalSince(lastFailure) >= Self.selfRefreshRetryDelay
+    }
+
+    /// Bring the session back online without user interaction when possible.
+    ///
+    /// Reloads from disk/Keychain first — Claude Code may have refreshed since we
+    /// last looked, and adopting its token costs nothing. Only if that still leaves
+    /// a long-dead token do we spend the refresh token ourselves. Completion
+    /// reports whether a usable (non-expired) token is now loaded.
+    func recoverSession(completion: @escaping (Bool) -> Void) {
+        reloadCredentials { [weak self] _ in
+            guard let self else { completion(false); return }
+            if self.isAuthenticated && !self.tokenExpired {
+                completion(true)
+                return
+            }
+            guard self.canSelfRefresh else {
+                completion(false)
+                return
+            }
+            Log.info("Token dead for >\(Int(Self.staleTokenGrace / 3600))h — no live CLI can hold it, refreshing ourselves")
+            self.selfRefreshToken(completion: completion)
+        }
+    }
+
+    /// Silent OAuth `refresh_token` grant. Private on purpose: `recoverSession`
+    /// owns the staleness gate that keeps this off an active CLI's tokens.
+    /// New tokens are written back to the Keychain (and credentials file when it
+    /// exists) so Claude Code picks them up on its next run.
+    private func selfRefreshToken(completion: @escaping (Bool) -> Void) {
+        guard let rt = refreshToken, !rt.isEmpty else {
+            Log.warn("selfRefreshToken: no refresh token available")
+            completion(false)
+            return
+        }
+
+        // Coalesce: a second caller joins the in-flight grant instead of spending
+        // the (now rotated) refresh token a second time.
+        if isSelfRefreshing {
+            Log.info("selfRefreshToken: grant already in flight, waiting for it")
+            selfRefreshWaiters.append(completion)
+            return
+        }
+
+        isSelfRefreshing = true
+        Log.info("selfRefreshToken: attempting refresh_token grant")
+
+        let finish: (Bool) -> Void = { [weak self] success in
+            DispatchQueue.main.async {
+                guard let self else { completion(success); return }
+                self.isSelfRefreshing = false
+                self.lastSelfRefreshFailure = success ? nil : Date()
+                let waiters = self.selfRefreshWaiters
+                self.selfRefreshWaiters = []
+                completion(success)
+                waiters.forEach { $0(success) }
+            }
+        }
+
+        var request = URLRequest(url: Self.oauthTokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("claude-code/2.1", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 15
+        // RFC 6749 §6 requires form-encoded bodies for token endpoint requests.
+        var allowedChars = CharacterSet.alphanumerics
+        allowedChars.insert(charactersIn: "-._~")
+        let encodedToken = rt.addingPercentEncoding(withAllowedCharacters: allowedChars) ?? rt
+        request.httpBody = "grant_type=refresh_token&refresh_token=\(encodedToken)&client_id=\(Self.oauthClientID)"
+            .data(using: .utf8)
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+            guard let self else { finish(false); return }
+
+            if let error {
+                Log.error("selfRefreshToken: network error: \(error.localizedDescription)")
+                finish(false)
+                return
+            }
+            guard let data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let newAccessToken = json["access_token"] as? String, !newAccessToken.isEmpty else {
+                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? "(no body)"
+                Log.error("selfRefreshToken: bad response — \(body.prefix(200))")
+                finish(false)
+                return
+            }
+
+            let newRefreshToken = json["refresh_token"] as? String ?? rt
+            let expiresIn = json["expires_in"] as? Double ?? 3600
+            let newExpiresAt = (Date().timeIntervalSince1970 + expiresIn) * 1000
+
+            DispatchQueue.main.async {
+                self.accessToken = newAccessToken
+                self.refreshToken = newRefreshToken
+                self.tokenExpiresAt = newExpiresAt
+                self.isAuthenticated = true
+                Log.info("selfRefreshToken: success — new token expires in \(Int(expiresIn))s")
+                self.persistRefreshedCredentials(
+                    accessToken: newAccessToken,
+                    refreshToken: newRefreshToken,
+                    expiresAt: newExpiresAt
+                )
+                finish(true)
+            }
+        }.resume()
+    }
+
+    /// Write refreshed tokens back to the Keychain item they came from and to the
+    /// credentials file when present, preserving every other field
+    /// (subscriptionType, rateLimitTier, scopes) so Claude Code picks up the
+    /// rotation instead of 401-ing on a token we spent.
+    ///
+    /// The write goes through `SecItemUpdate` rather than
+    /// `security add-generic-password -U`: Claude Code's item carries no account
+    /// attribute, which the CLI cannot express (`-a` is mandatory), so the CLI
+    /// would happily *create* a second item that then shadows the real one on
+    /// every read. `SecItemUpdate` either updates the item we read or fails.
+    private func persistRefreshedCredentials(accessToken: String, refreshToken: String, expiresAt: Double) {
+        guard let entry = keychainEntry else {
+            Log.warn("persistRefreshedCredentials: no Keychain item on record, updating file only")
+            Self.updateCredentialsFile(accessToken: accessToken, refreshToken: refreshToken, expiresAt: expiresAt)
+            return
+        }
+
+        DispatchQueue.global(qos: .utility).async {
+            var root = entry.json
+            var oauth = root["claudeAiOauth"] as? [String: Any] ?? [:]
+            oauth["accessToken"] = accessToken
+            oauth["refreshToken"] = refreshToken
+            oauth["expiresAt"] = Int(expiresAt)
+            root["claudeAiOauth"] = oauth
+
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: root) else {
+                Log.error("persistRefreshedCredentials: failed to serialize JSON")
+                return
+            }
+
+            var query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: entry.service
+            ]
+            // Absent account attribute → match the item however it stores it,
+            // rather than inventing an empty-string account of our own.
+            if let account = entry.account { query[kSecAttrAccount as String] = account }
+
+            let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: jsonData] as CFDictionary)
+            if status == errSecSuccess {
+                Log.info("persistRefreshedCredentials: Keychain item \(entry.service) updated")
+            } else {
+                // Not fatal for us — the fresh token lives in memory — but Claude Code
+                // will still hold the spent one, so say so loudly.
+                Log.error("persistRefreshedCredentials: SecItemUpdate failed (status \(status)) — Claude Code keeps the old token")
+            }
+
+            Self.updateCredentialsFile(accessToken: accessToken, refreshToken: refreshToken, expiresAt: expiresAt)
+        }
+    }
+
+    /// Mirror refreshed tokens into `~/.claude/.credentials.json` when that file is
+    /// the store this machine uses. No-op when it does not exist.
+    private static func updateCredentialsFile(accessToken: String, refreshToken: String, expiresAt: Double) {
+        guard FileManager.default.fileExists(atPath: credentialsPath.path),
+              let fileData = try? Data(contentsOf: credentialsPath),
+              var fileJSON = try? JSONSerialization.jsonObject(with: fileData) as? [String: Any]
+        else { return }
+
+        var oauth = fileJSON["claudeAiOauth"] as? [String: Any] ?? [:]
+        oauth["accessToken"] = accessToken
+        oauth["refreshToken"] = refreshToken
+        oauth["expiresAt"] = Int(expiresAt)
+        fileJSON["claudeAiOauth"] = oauth
+
+        guard let newData = try? JSONSerialization.data(withJSONObject: fileJSON) else {
+            Log.error("updateCredentialsFile: failed to serialize JSON")
+            return
+        }
+        do {
+            try newData.write(to: credentialsPath)
+            Log.info("updateCredentialsFile: credentials file updated")
+        } catch {
+            Log.error("updateCredentialsFile: write failed: \(error.localizedDescription)")
+        }
+    }
 
     // MARK: - Credentials file watcher
 
@@ -212,20 +441,22 @@ class AuthManager: ObservableObject {
     ///   2. `security find-generic-password -s "Claude Code-credentials" -a $USER`
     ///   3. `SecItemCopyMatching` scan over all `Claude Code-credentials*` entries
     ///      (covers per-project suffixed entries from newer Claude Code versions)
-    static func loadFromKeychain() -> [String: Any]? {
-        if let json = readKeychainViaSecurityCLI(service: "Claude Code-credentials", account: nil),
+    static func loadFromKeychain() -> KeychainCredentials? {
+        let service = "Claude Code-credentials"
+
+        if let json = readKeychainViaSecurityCLI(service: service, account: nil),
            hasFreshOAuthToken(json) {
-            return json
+            return KeychainCredentials(service: service, account: nil, json: json)
         }
 
         let user = NSUserName()
         if !user.isEmpty,
-           let json = readKeychainViaSecurityCLI(service: "Claude Code-credentials", account: user),
+           let json = readKeychainViaSecurityCLI(service: service, account: user),
            hasFreshOAuthToken(json) {
-            return json
+            return KeychainCredentials(service: service, account: user, json: json)
         }
 
-        return loadBestKeychainEntryWithPrefix("Claude Code-credentials")
+        return loadBestKeychainEntryWithPrefix(service)
     }
 
     private static func readKeychainViaSecurityCLI(service: String, account: String?) -> [String: Any]? {
@@ -263,7 +494,7 @@ class AuthManager: ObservableObject {
         return Date(timeIntervalSince1970: expiresAt / 1000) > Date()
     }
 
-    private static func loadBestKeychainEntryWithPrefix(_ prefix: String) -> [String: Any]? {
+    private static func loadBestKeychainEntryWithPrefix(_ prefix: String) -> KeychainCredentials? {
         // The legacy file-based login keychain rejects kSecReturnAttributes+kSecReturnData
         // together with kSecMatchLimitAll (returns errSecParam). Enumerate refs+attributes
         // first, then fetch each item's data with a per-item query.
@@ -281,9 +512,8 @@ class AuthManager: ObservableObject {
             return nil
         }
 
-        var bestJSON: [String: Any]?
+        var best: KeychainCredentials?
         var bestExpiry: Double = 0
-        var bestAccount: String = ""
 
         for item in items {
             guard let service = item[kSecAttrService as String] as? String,
@@ -299,14 +529,13 @@ class AuthManager: ObservableObject {
             let expiresAt = oauth["expiresAt"] as? Double ?? 0
             if expiresAt > bestExpiry {
                 bestExpiry = expiresAt
-                bestJSON = json
-                bestAccount = account
+                best = KeychainCredentials(service: service, account: account.isEmpty ? nil : account, json: json)
             }
         }
 
-        if bestJSON != nil {
-            Log.info("loadBestKeychainEntryWithPrefix: using entry account=\(bestAccount.isEmpty ? "<empty>" : bestAccount) (prefix: \(prefix))")
+        if let best {
+            Log.info("loadBestKeychainEntryWithPrefix: using entry account=\(best.account ?? "<empty>") (prefix: \(prefix))")
         }
-        return bestJSON
+        return best
     }
 }

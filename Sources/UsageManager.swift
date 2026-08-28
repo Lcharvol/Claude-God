@@ -118,6 +118,9 @@ struct AccountInfo: Identifiable, Codable {
     var id = UUID()
     var label: String       // e.g. "Work", "Personal"
     var credentialsPath: String
+    /// CLAUDE_CONFIG_DIR of this account; nil = the default ~/.claude login.
+    /// Optional so account lists saved by earlier versions still decode.
+    var configDir: String? = nil
 }
 
 // MARK: - Seuils de couleur partagés
@@ -946,6 +949,9 @@ class UsageManager: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
 
+        // The account context must be in place before the first credential load,
+        // or startup would briefly adopt the default account's token.
+        applyActiveAccountContext()
         auth.loadCredentials()
         auth.startWatchingCredentials()
 
@@ -1988,13 +1994,41 @@ class UsageManager: ObservableObject {
 
     // MARK: - Multi-account
 
-    func addAccount(label: String, path: String) {
-        accounts.append(AccountInfo(label: label, credentialsPath: path))
+    /// Point every account-scoped subsystem — credentials file, Keychain
+    /// service, session analytics, file watcher — at the selected account's
+    /// config dir. Must run before any credential load that should honor the
+    /// selection.
+    private func applyActiveAccountContext() {
+        let account = (activeAccountIndex >= 0 && activeAccountIndex < accounts.count)
+            ? accounts[activeAccountIndex] : nil
+        ActiveAccount.configDir = account?.configDir
+        auth.startWatchingCredentials()
+    }
+
+    /// Register the account living in `configDirURL` (a CLAUDE_CONFIG_DIR).
+    /// The first added account also inserts a row for the default ~/.claude
+    /// login, so there is always a way to switch back to it.
+    func addAccount(configDirURL: URL) {
+        if accounts.isEmpty {
+            let defaultCredentials = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".claude/.credentials.json")
+            accounts.append(AccountInfo(label: "Default", credentialsPath: defaultCredentials.path, configDir: nil))
+        }
+        // The Keychain service name hashes the exact directory string, so store
+        // the path in its canonical no-trailing-slash form.
+        let dir = configDirURL.standardizedFileURL.path
+        guard !accounts.contains(where: { $0.configDir == dir }) else { return }
+        accounts.append(AccountInfo(
+            label: configDirURL.lastPathComponent,
+            credentialsPath: dir + "/.credentials.json",
+            configDir: dir
+        ))
     }
 
     func switchAccount(index: Int) {
         guard index >= 0 && index < accounts.count else { return }
         activeAccountIndex = index
+        applyActiveAccountContext()
         auth.loadCredentials()
         // Don't clear quotas — keep old data until new ones arrive
         refresh()
@@ -2006,6 +2040,8 @@ class UsageManager: ObservableObject {
         if activeAccountIndex >= accounts.count {
             activeAccountIndex = max(0, accounts.count - 1)
         }
+        applyActiveAccountContext()
+        auth.loadCredentials()
     }
 
     // MARK: - Widget data sharing

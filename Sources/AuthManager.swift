@@ -41,6 +41,12 @@ class AuthManager: ObservableObject {
     /// one, so we never shadow Claude Code's entry with a duplicate the app
     /// would then read instead of the real thing.
     private var keychainEntry: KeychainCredentials?
+
+    /// Bumped on every account switch. A Keychain read runs off the main thread,
+    /// so a resolution started for the previous account can land after the user
+    /// has already picked another one — the generation it captured no longer
+    /// matches and its result is dropped instead of adopted.
+    private var accountGeneration = 0
     private var isSelfRefreshing = false
     private var lastSelfRefreshFailure: Date?
     /// Callers that asked for a refresh while one was already in flight — they all
@@ -58,6 +64,25 @@ class AuthManager: ObservableObject {
     // `recoverSession` is the only entry point; see it below.
 
     static var credentialsPath: URL { ActiveAccount.credentialsFile }
+
+    /// Forget the current account's credentials before another one is loaded.
+    ///
+    /// `resolveCredentials` deliberately keeps the last good token when a read
+    /// comes back empty, so a transient failure never signs the user out. On a
+    /// deliberate account switch that guarantee is exactly backwards: the
+    /// popover would keep serving the previous account's quota under the newly
+    /// selected row. Clearing `keychainEntry` matters just as much — a refresh
+    /// must not write the new account's token into the old account's item.
+    func resetForAccountSwitch() {
+        accountGeneration += 1
+        accessToken = nil
+        refreshToken = nil
+        tokenExpiresAt = nil
+        keychainEntry = nil
+        subscriptionType = ""
+        credentialSource = .none
+        isAuthenticated = false
+    }
 
     // MARK: - Credential loading
 
@@ -102,6 +127,7 @@ class AuthManager: ObservableObject {
     /// an expired token, so re-signing in never cleared "Session expired".
     private func resolveCredentials(completion: @escaping (Bool) -> Void) {
         let previousToken = accessToken
+        let generation = accountGeneration
         let fileJSON = Self.fileCredentialsJSON()
 
         // Fast path: file token still valid — no Keychain round-trip needed.
@@ -116,6 +142,12 @@ class AuthManager: ObservableObject {
             let keychainEntry = Self.loadFromKeychain()
             DispatchQueue.main.async {
                 guard let self else { return }
+                guard generation == self.accountGeneration else {
+                    // The active account changed while this read was in flight;
+                    // whatever it found belongs to the account we just left.
+                    completion(false)
+                    return
+                }
                 // Remember where the Keychain copy lives even when the file wins
                 // below — that item is still the one a refresh must write back to.
                 if let keychainEntry { self.keychainEntry = keychainEntry }

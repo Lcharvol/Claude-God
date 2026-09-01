@@ -1016,12 +1016,28 @@ class UsageManager: ObservableObject {
         refreshStats()
     }
 
+    /// Replace the stats on screen with the active account's, pre-empting any
+    /// scan already running: `refreshStats` drops the request while one is in
+    /// flight, which on an account switch would leave the previous account's
+    /// numbers on screen until the next popover open.
+    private func forceRefreshStats() {
+        statsWorkItem?.cancel()
+        statsWorkItem = nil
+        isLoadingStats = false
+        lastStatsRefresh = nil
+        refreshStats()
+    }
+
     func refreshStats() {
         guard !isLoadingStats else { return }
         isLoadingStats = true
 
         // Cancel any previous in-flight stats work
         statsWorkItem?.cancel()
+
+        // Which account this scan reads; results from a superseded account are
+        // discarded rather than allowed to overwrite the new selection's.
+        let scannedAccount = ActiveAccount.configDir
 
         let workItem = DispatchWorkItem { [weak self] in
             let cal = Calendar.current
@@ -1037,6 +1053,7 @@ class UsageManager: ObservableObject {
             let today = month.filtered(since: todayStart)
 
             DispatchQueue.main.async {
+                guard ActiveAccount.configDir == scannedAccount else { return }
                 self?.todayStats = today
                 self?.weekStats = week
                 self?.monthStats = month
@@ -1057,9 +1074,11 @@ class UsageManager: ObservableObject {
         isLoadingTimeline = true
         timelineWorkItem?.cancel()
         let date = timelineDate
+        let scannedAccount = ActiveAccount.configDir
         let workItem = DispatchWorkItem { [weak self] in
             let sessions = SessionAnalyzer.timelineSessions(for: date)
             DispatchQueue.main.async {
+                guard ActiveAccount.configDir == scannedAccount else { return }
                 self?.timelineSessions = sessions
                 self?.isLoadingTimeline = false
             }
@@ -2005,43 +2024,91 @@ class UsageManager: ObservableObject {
         auth.startWatchingCredentials()
     }
 
+    /// `~/.claude` — where Claude Code stores the login used when
+    /// CLAUDE_CONFIG_DIR is unset.
+    private static var defaultConfigDirPath: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude").standardizedFileURL.path
+    }
+
+    /// The row standing for the default login, so there is always a way back.
+    private static var defaultAccount: AccountInfo {
+        AccountInfo(
+            label: "Default",
+            credentialsPath: defaultConfigDirPath + "/.credentials.json",
+            configDir: nil
+        )
+    }
+
     /// Register the account living in `configDirURL` (a CLAUDE_CONFIG_DIR).
     /// The first added account also inserts a row for the default ~/.claude
     /// login, so there is always a way to switch back to it.
     func addAccount(configDirURL: URL) {
-        if accounts.isEmpty {
-            let defaultCredentials = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".claude/.credentials.json")
-            accounts.append(AccountInfo(label: "Default", credentialsPath: defaultCredentials.path, configDir: nil))
-        }
         // The Keychain service name hashes the exact directory string, so store
         // the path in its canonical no-trailing-slash form.
         let dir = configDirURL.standardizedFileURL.path
-        guard !accounts.contains(where: { $0.configDir == dir }) else { return }
+        // Picking ~/.claude is the default login, not a CLAUDE_CONFIG_DIR
+        // profile: its credentials live in the un-suffixed Keychain service, so
+        // hashing that path would point the account at an item that never
+        // exists and the row could never authenticate.
+        let configDir: String? = dir == Self.defaultConfigDirPath ? nil : dir
+
+        if accounts.isEmpty {
+            accounts.append(Self.defaultAccount)
+        }
+        guard !accounts.contains(where: { $0.configDir == configDir }) else { return }
         accounts.append(AccountInfo(
             label: configDirURL.lastPathComponent,
             credentialsPath: dir + "/.credentials.json",
-            configDir: dir
+            configDir: configDir
         ))
+    }
+
+    /// Re-point every account-scoped subsystem at the current selection, then
+    /// reload everything that was derived from the account we just left: quota,
+    /// stats and timeline all outlive the switch otherwise.
+    private func reloadForActiveAccount() {
+        applyActiveAccountContext()
+        auth.resetForAccountSwitch()
+        // The quota fetch needs a token, and resolving one may go to the
+        // Keychain off the main thread — so it waits for the resolution instead
+        // of firing against the cleared state.
+        auth.reloadCredentials { [weak self] resolved in
+            guard let self else { return }
+            if resolved {
+                // Don't clear quotas — keep old data until new ones arrive
+                self.refresh()
+            } else {
+                self.errorMessage = "No credentials for this account — run `claude auth login` with its CLAUDE_CONFIG_DIR"
+            }
+        }
+        // Transcripts are read straight off disk, so these need no credentials.
+        forceRefreshStats()
+        refreshTimeline()
     }
 
     func switchAccount(index: Int) {
         guard index >= 0 && index < accounts.count else { return }
         activeAccountIndex = index
-        applyActiveAccountContext()
-        auth.loadCredentials()
-        // Don't clear quotas — keep old data until new ones arrive
-        refresh()
+        reloadForActiveAccount()
     }
 
     func removeAccount(at index: Int) {
         guard index >= 0 && index < accounts.count else { return }
+        let previousConfigDir = ActiveAccount.configDir
         accounts.remove(at: index)
+        // Removing a row above the active one shifts the selection down with it;
+        // without this, deleting an account silently switches to its neighbour.
+        if index < activeAccountIndex { activeAccountIndex -= 1 }
         if activeAccountIndex >= accounts.count {
             activeAccountIndex = max(0, accounts.count - 1)
         }
         applyActiveAccountContext()
-        auth.loadCredentials()
+        // Only pay for a full reload when the removal actually changed which
+        // account is active.
+        if ActiveAccount.configDir != previousConfigDir {
+            reloadForActiveAccount()
+        }
     }
 
     // MARK: - Widget data sharing

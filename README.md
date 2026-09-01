@@ -164,6 +164,13 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.25.5
+- **Fixed**: The Accounts section toggled a green dot and nothing else — every row resolved the same credentials, because `switchAccount()` always fell back to the default Keychain entry (or a prefix scan that picked whichever token was freshest), "Add" registered one hardcoded path for every row, and analytics were pinned to `~/.claude/projects`. A new `ActiveAccount` context derives the credentials file, Keychain service and `projects/` dir from the selected account's `CLAUDE_CONFIG_DIR`, and "Add" now asks for that directory ([#47](https://github.com/Lcharvol/Claude-God/pull/47), thanks @ValeriiMedvezhonkov)
+- **Fixed**: A switch that found no credentials kept the previous account signed in, so the new row showed the old account's quota. The switch now clears the token and the remembered Keychain coordinates first — a refresh could otherwise write one account's token into another's item — and says so when nothing resolves
+- **Fixed**: Timeline and costs lagged a switch by up to two minutes, sitting behind the 120-second staleness window that only lifts on popover open. Both scans are forced on switch and tagged with the account they read
+- **Fixed**: Choosing `~/.claude` in the picker created a row that could never authenticate — it was hashed into a suffixed Keychain service while the default login lives in the un-suffixed one. It now resolves to the default account
+- **Fixed**: Removing an account above the active one shifted the selection onto a different account without reloading it
+
 ### v2.25.4
 - **Fixed**: The app got permanently stuck once you stopped running `claude` in a terminal — v2.25.1 made it a pure credential reader, counting on the CLI to keep refreshing the shared Keychain entry, which the Claude desktop app never touches. The token expired, nothing revived it, and the popover showed "Rate limited" over a `401 token has expired`. `recoverSession()` now reloads disk/Keychain first and only spends the shared refresh token once the access token has been dead 12h — long enough that no running CLI can still hold it, so [#40](https://github.com/Lcharvol/Claude-God/issues/40) stays fixed ([#46](https://github.com/Lcharvol/Claude-God/pull/46))
 - **Fixed**: An expired session was reported as "Rate limited — retrying in 30s", sending users to wait out a limit they never hit. A 429 on a known-expired token now triggers recovery, then says "Session expired" with the Sign In button

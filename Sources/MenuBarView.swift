@@ -679,12 +679,21 @@ struct MenuBarView: View {
                         SHLabel("Accounts")
                         Spacer()
                         SHButton(label: "Add", icon: "plus", style: .ghost) {
-                            let label = manager.accounts.isEmpty ? "Default" : "Account \(manager.accounts.count + 1)"
-                            manager.addAccount(label: label, path: AuthManager.credentialsPath.path)
+                            let panel = NSOpenPanel()
+                            panel.canChooseFiles = false
+                            panel.canChooseDirectories = true
+                            panel.allowsMultipleSelection = false
+                            panel.showsHiddenFiles = true
+                            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+                            panel.message = "Choose the account's config directory — the folder its CLAUDE_CONFIG_DIR points to"
+                            panel.prompt = "Add Account"
+                            if panel.runModal() == .OK, let url = panel.url {
+                                manager.addAccount(configDirURL: url)
+                            }
                         }
                     }
                     if manager.accounts.isEmpty {
-                        Text("Using default credentials. Add accounts to switch between profiles.")
+                        Text("Using default credentials. Add an account's config directory (CLAUDE_CONFIG_DIR) to switch between logins.")
                             .shFont(11)
                             .foregroundColor(.secondary)
                     } else {
@@ -695,6 +704,9 @@ struct MenuBarView: View {
                                     .frame(width: 6, height: 6)
                                 Text(account.label)
                                     .shFont(11, weight: index == manager.activeAccountIndex ? .semibold : .regular)
+                                Text(account.configDir == nil ? "default" : "profile")
+                                    .shFont(9)
+                                    .foregroundColor(.secondary)
                                 Spacer()
                                 if index != manager.activeAccountIndex {
                                     SHButton(label: "Switch", style: .ghost) {

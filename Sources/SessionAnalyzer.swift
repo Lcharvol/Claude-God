@@ -408,10 +408,9 @@ class SessionAnalyzer {
         JSONDecoder()
     }()
 
-    static let projectsDir: URL = {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/projects")
-    }()
+    // Computed so switching accounts re-points every consumer at the active
+    // account's transcripts.
+    static var projectsDir: URL { ActiveAccount.dataDir.appendingPathComponent("projects") }
 
     /// Max JSONL file size to load into memory (300 MB)
     private static let maxFileSize: UInt64 = 300 * 1024 * 1024

@@ -41,6 +41,12 @@ class AuthManager: ObservableObject {
     /// one, so we never shadow Claude Code's entry with a duplicate the app
     /// would then read instead of the real thing.
     private var keychainEntry: KeychainCredentials?
+
+    /// Bumped on every account switch. A Keychain read runs off the main thread,
+    /// so a resolution started for the previous account can land after the user
+    /// has already picked another one — the generation it captured no longer
+    /// matches and its result is dropped instead of adopted.
+    private var accountGeneration = 0
     private var isSelfRefreshing = false
     private var lastSelfRefreshFailure: Date?
     /// Callers that asked for a refresh while one was already in flight — they all
@@ -57,10 +63,26 @@ class AuthManager: ObservableObject {
     // keeps its own auth and never touches this Keychain entry).
     // `recoverSession` is the only entry point; see it below.
 
-    static let credentialsPath: URL = {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/.credentials.json")
-    }()
+    static var credentialsPath: URL { ActiveAccount.credentialsFile }
+
+    /// Forget the current account's credentials before another one is loaded.
+    ///
+    /// `resolveCredentials` deliberately keeps the last good token when a read
+    /// comes back empty, so a transient failure never signs the user out. On a
+    /// deliberate account switch that guarantee is exactly backwards: the
+    /// popover would keep serving the previous account's quota under the newly
+    /// selected row. Clearing `keychainEntry` matters just as much — a refresh
+    /// must not write the new account's token into the old account's item.
+    func resetForAccountSwitch() {
+        accountGeneration += 1
+        accessToken = nil
+        refreshToken = nil
+        tokenExpiresAt = nil
+        keychainEntry = nil
+        subscriptionType = ""
+        credentialSource = .none
+        isAuthenticated = false
+    }
 
     // MARK: - Credential loading
 
@@ -68,7 +90,7 @@ class AuthManager: ObservableObject {
         resolveCredentials { _ in }
     }
 
-    /// Credentials JSON from `~/.claude/.credentials.json`, or nil if absent/unusable.
+    /// Credentials JSON from the active account's `.credentials.json`, or nil if absent/unusable.
     private static func fileCredentialsJSON() -> [String: Any]? {
         guard let data = try? Data(contentsOf: credentialsPath),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -105,6 +127,7 @@ class AuthManager: ObservableObject {
     /// an expired token, so re-signing in never cleared "Session expired".
     private func resolveCredentials(completion: @escaping (Bool) -> Void) {
         let previousToken = accessToken
+        let generation = accountGeneration
         let fileJSON = Self.fileCredentialsJSON()
 
         // Fast path: file token still valid — no Keychain round-trip needed.
@@ -119,6 +142,12 @@ class AuthManager: ObservableObject {
             let keychainEntry = Self.loadFromKeychain()
             DispatchQueue.main.async {
                 guard let self else { return }
+                guard generation == self.accountGeneration else {
+                    // The active account changed while this read was in flight;
+                    // whatever it found belongs to the account we just left.
+                    completion(false)
+                    return
+                }
                 // Remember where the Keychain copy lives even when the file wins
                 // below — that item is still the one a refresh must write back to.
                 if let keychainEntry { self.keychainEntry = keychainEntry }
@@ -138,7 +167,8 @@ class AuthManager: ObservableObject {
                     return
                 }
 
-                if let envToken = ProcessInfo.processInfo.environment["CLAUDE_CODE_OAUTH_TOKEN"],
+                if !ActiveAccount.isPinned,
+                   let envToken = ProcessInfo.processInfo.environment["CLAUDE_CODE_OAUTH_TOKEN"],
                    !envToken.isEmpty {
                     self.accessToken = envToken
                     self.credentialSource = .environment
@@ -437,12 +467,15 @@ class AuthManager: ObservableObject {
     /// `$USER`, so the per-account fast path resolves cleanly without any prompt.
     ///
     /// Order:
-    ///   1. `security find-generic-password -s "Claude Code-credentials"` (no `-a`)
-    ///   2. `security find-generic-password -s "Claude Code-credentials" -a $USER`
-    ///   3. `SecItemCopyMatching` scan over all `Claude Code-credentials*` entries
-    ///      (covers per-project suffixed entries from newer Claude Code versions)
+    ///   1. `security find-generic-password -s <active account's service>` (no `-a`)
+    ///   2. `security find-generic-password -s <active account's service> -a $USER`
+    ///   3. `SecItemCopyMatching` scan — prefix-matched when no explicit account
+    ///      is selected (covers per-project suffixed entries from newer Claude
+    ///      Code versions), but exact-matched for a pinned account: the
+    ///      freshest-token prefix scan would otherwise resolve to whichever
+    ///      *other* account refreshed most recently.
     static func loadFromKeychain() -> KeychainCredentials? {
-        let service = "Claude Code-credentials"
+        let service = ActiveAccount.keychainService
 
         if let json = readKeychainViaSecurityCLI(service: service, account: nil),
            hasFreshOAuthToken(json) {
@@ -456,7 +489,7 @@ class AuthManager: ObservableObject {
             return KeychainCredentials(service: service, account: user, json: json)
         }
 
-        return loadBestKeychainEntryWithPrefix(service)
+        return loadBestKeychainEntry(matching: service, exact: ActiveAccount.isPinned)
     }
 
     private static func readKeychainViaSecurityCLI(service: String, account: String?) -> [String: Any]? {
@@ -494,7 +527,7 @@ class AuthManager: ObservableObject {
         return Date(timeIntervalSince1970: expiresAt / 1000) > Date()
     }
 
-    private static func loadBestKeychainEntryWithPrefix(_ prefix: String) -> KeychainCredentials? {
+    private static func loadBestKeychainEntry(matching target: String, exact: Bool) -> KeychainCredentials? {
         // The legacy file-based login keychain rejects kSecReturnAttributes+kSecReturnData
         // together with kSecMatchLimitAll (returns errSecParam). Enumerate refs+attributes
         // first, then fetch each item's data with a per-item query.
@@ -508,7 +541,7 @@ class AuthManager: ObservableObject {
         let listStatus = SecItemCopyMatching(listQuery as CFDictionary, &listRaw)
         guard listStatus == errSecSuccess,
               let items = listRaw as? [[String: Any]] else {
-            Log.info("loadBestKeychainEntryWithPrefix: list query failed status=\(listStatus)")
+            Log.info("loadBestKeychainEntry: list query failed status=\(listStatus)")
             return nil
         }
 
@@ -517,7 +550,7 @@ class AuthManager: ObservableObject {
 
         for item in items {
             guard let service = item[kSecAttrService as String] as? String,
-                  service.hasPrefix(prefix) else { continue }
+                  exact ? service == target : service.hasPrefix(target) else { continue }
             let account = item[kSecAttrAccount as String] as? String ?? ""
 
             // ponytail: use CLI (no-prompt) instead of SecItemCopyMatching+kSecReturnData (prompts)
@@ -534,7 +567,7 @@ class AuthManager: ObservableObject {
         }
 
         if let best {
-            Log.info("loadBestKeychainEntryWithPrefix: using entry account=\(best.account ?? "<empty>") (prefix: \(prefix))")
+            Log.info("loadBestKeychainEntry: using entry service=\(best.service) account=\(best.account ?? "<empty>") (target: \(target), exact: \(exact))")
         }
         return best
     }

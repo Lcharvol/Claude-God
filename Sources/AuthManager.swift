@@ -343,11 +343,19 @@ class AuthManager: ObservableObject {
     /// (subscriptionType, rateLimitTier, scopes) so Claude Code picks up the
     /// rotation instead of 401-ing on a token we spent.
     ///
-    /// The write goes through `SecItemUpdate` rather than
-    /// `security add-generic-password -U`: Claude Code's item carries no account
-    /// attribute, which the CLI cannot express (`-a` is mandatory), so the CLI
-    /// would happily *create* a second item that then shadows the real one on
-    /// every read. `SecItemUpdate` either updates the item we read or fails.
+    /// The write shells out to `security add-generic-password -U` — the tool
+    /// Claude Code itself writes with — never to `SecItemUpdate`. macOS re-stamps
+    /// an item's partition list with the identity of the process that last
+    /// modified it, so an in-process update left the item readable only by this
+    /// app's own cdhash: every later `/usr/bin/security` read (ours and Claude
+    /// Code's alike) then raised a keychain password dialog, and it came back
+    /// after each refresh (issue #48). Going through `security` keeps the item in
+    /// the `apple-tool:` partition it was created in.
+    ///
+    /// The item is addressed by the exact (service, account) pair it was read
+    /// from: `-U` matches on both, and a mismatch would *create* a second item
+    /// that shadows Claude Code's on every read. An item with no account
+    /// attribute is addressed with `-a ""`, which `security` stores as NULL.
     private func persistRefreshedCredentials(accessToken: String, refreshToken: String, expiresAt: Double) {
         guard let entry = keychainEntry else {
             Log.warn("persistRefreshedCredentials: no Keychain item on record, updating file only")
@@ -356,37 +364,34 @@ class AuthManager: ObservableObject {
         }
 
         DispatchQueue.global(qos: .utility).async {
-            var root = entry.json
-            var oauth = root["claudeAiOauth"] as? [String: Any] ?? [:]
-            oauth["accessToken"] = accessToken
-            oauth["refreshToken"] = refreshToken
-            oauth["expiresAt"] = Int(expiresAt)
-            root["claudeAiOauth"] = oauth
-
-            guard let jsonData = try? JSONSerialization.data(withJSONObject: root) else {
+            let root = Self.credentialsJSON(entry.json, accessToken: accessToken, refreshToken: refreshToken, expiresAt: expiresAt)
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: root),
+                  let jsonString = String(data: jsonData, encoding: .utf8) else {
                 Log.error("persistRefreshedCredentials: failed to serialize JSON")
                 return
             }
 
-            var query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: entry.service
-            ]
-            // Absent account attribute → match the item however it stores it,
-            // rather than inventing an empty-string account of our own.
-            if let account = entry.account { query[kSecAttrAccount as String] = account }
-
-            let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: jsonData] as CFDictionary)
-            if status == errSecSuccess {
+            switch Self.writeKeychainViaSecurityCLI(service: entry.service, account: entry.account, password: jsonString) {
+            case .success:
                 Log.info("persistRefreshedCredentials: Keychain item \(entry.service) updated")
-            } else {
+            case .failure(let error):
                 // Not fatal for us — the fresh token lives in memory — but Claude Code
                 // will still hold the spent one, so say so loudly.
-                Log.error("persistRefreshedCredentials: SecItemUpdate failed (status \(status)) — Claude Code keeps the old token")
+                Log.error("persistRefreshedCredentials: Keychain write failed (\(error)) — Claude Code keeps the old token")
             }
 
             Self.updateCredentialsFile(accessToken: accessToken, refreshToken: refreshToken, expiresAt: expiresAt)
         }
+    }
+
+    /// `root` with its `claudeAiOauth` tokens replaced, every other field untouched.
+    static func credentialsJSON(_ root: [String: Any], accessToken: String, refreshToken: String, expiresAt: Double) -> [String: Any] {
+        let oauth = (root["claudeAiOauth"] as? [String: Any] ?? [:]).merging([
+            "accessToken": accessToken,
+            "refreshToken": refreshToken,
+            "expiresAt": Int(expiresAt)
+        ]) { _, new in new }
+        return root.merging(["claudeAiOauth": oauth]) { _, new in new }
     }
 
     /// Mirror refreshed tokens into `~/.claude/.credentials.json` when that file is
@@ -394,16 +399,11 @@ class AuthManager: ObservableObject {
     private static func updateCredentialsFile(accessToken: String, refreshToken: String, expiresAt: Double) {
         guard FileManager.default.fileExists(atPath: credentialsPath.path),
               let fileData = try? Data(contentsOf: credentialsPath),
-              var fileJSON = try? JSONSerialization.jsonObject(with: fileData) as? [String: Any]
+              let fileJSON = try? JSONSerialization.jsonObject(with: fileData) as? [String: Any]
         else { return }
 
-        var oauth = fileJSON["claudeAiOauth"] as? [String: Any] ?? [:]
-        oauth["accessToken"] = accessToken
-        oauth["refreshToken"] = refreshToken
-        oauth["expiresAt"] = Int(expiresAt)
-        fileJSON["claudeAiOauth"] = oauth
-
-        guard let newData = try? JSONSerialization.data(withJSONObject: fileJSON) else {
+        let updated = credentialsJSON(fileJSON, accessToken: accessToken, refreshToken: refreshToken, expiresAt: expiresAt)
+        guard let newData = try? JSONSerialization.data(withJSONObject: updated) else {
             Log.error("updateCredentialsFile: failed to serialize JSON")
             return
         }
@@ -458,6 +458,45 @@ class AuthManager: ObservableObject {
 
     // MARK: - Keychain
 
+    /// Why `/usr/bin/security` failed, for the log line.
+    enum SecurityCLIError: Error, CustomStringConvertible {
+        case launchFailed(String)
+        case exitStatus(Int32, stderr: String)
+
+        var description: String {
+            switch self {
+            case .launchFailed(let reason): return "could not launch security: \(reason)"
+            case .exitStatus(let status, let stderr):
+                let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                return "security exited with status \(status)" + (detail.isEmpty ? "" : ": \(detail)")
+            }
+        }
+    }
+
+    private static let securityCLIPath = "/usr/bin/security"
+
+    /// Serialises `security` spawns across polls. A `security` process that is
+    /// blocked on a keychain authorization dialog never exits on its own, and the
+    /// expired-credential poller asks again every 10 s — without this gate those
+    /// spawns piled up (64 observed in issue #48), each queuing one more copy of
+    /// the same dialog. While one read is pending, later polls skip their turn.
+    private static let keychainReadLock = NSLock()
+    private static var isKeychainReadInFlight = false
+
+    private static func beginKeychainRead() -> Bool {
+        keychainReadLock.lock()
+        defer { keychainReadLock.unlock() }
+        guard !isKeychainReadInFlight else { return false }
+        isKeychainReadInFlight = true
+        return true
+    }
+
+    private static func endKeychainRead() {
+        keychainReadLock.lock()
+        isKeychainReadInFlight = false
+        keychainReadLock.unlock()
+    }
+
     /// Load credentials from Keychain.
     ///
     /// Tries cheap, non-prompting `/usr/bin/security` shell-outs first (no keychain
@@ -474,12 +513,25 @@ class AuthManager: ObservableObject {
     ///      Code versions), but exact-matched for a pinned account: the
     ///      freshest-token prefix scan would otherwise resolve to whichever
     ///      *other* account refreshed most recently.
+    ///
+    /// Every hit records the item's real account attribute, because a refreshed
+    /// token is written back by (service, account) and a guessed account would
+    /// create a second item instead of updating Claude Code's.
     static func loadFromKeychain() -> KeychainCredentials? {
+        guard beginKeychainRead() else {
+            Log.warn("loadFromKeychain: a Keychain read is still pending (waiting on an authorization dialog?), skipping this one")
+            return nil
+        }
+        defer { endKeychainRead() }
+
         let service = ActiveAccount.keychainService
 
+        // Path 1 matches the item whatever its account is, so ask `security`
+        // which one it picked before trusting the hit.
         if let json = readKeychainViaSecurityCLI(service: service, account: nil),
-           hasFreshOAuthToken(json) {
-            return KeychainCredentials(service: service, account: nil, json: json)
+           hasFreshOAuthToken(json),
+           case .success(let account) = storedKeychainAccount(service: service) {
+            return KeychainCredentials(service: service, account: account, json: json)
         }
 
         let user = NSUserName()
@@ -492,32 +544,76 @@ class AuthManager: ObservableObject {
         return loadBestKeychainEntry(matching: service, exact: ActiveAccount.isPinned)
     }
 
-    private static func readKeychainViaSecurityCLI(service: String, account: String?) -> [String: Any]? {
+    /// Runs `/usr/bin/security` with `arguments` and returns its stdout.
+    private static func runSecurityCLI(_ arguments: [String]) -> Result<String, SecurityCLIError> {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        var args = ["find-generic-password", "-s", service]
-        if let account = account { args.append(contentsOf: ["-a", account]) }
-        args.append("-w")
-        process.arguments = args
+        process.executableURL = URL(fileURLWithPath: securityCLIPath)
+        process.arguments = arguments
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
 
         do {
             try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0,
-                  let trimmed = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                      .trimmingCharacters(in: .whitespacesAndNewlines),
-                  !trimmed.isEmpty,
-                  let jsonData = trimmed.data(using: .utf8),
-                  let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
-            else { return nil }
-            return json
         } catch {
+            return .failure(.launchFailed(error.localizedDescription))
+        }
+        // Drain before waiting: a pipe that fills up would deadlock the child.
+        let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            return .failure(.exitStatus(process.terminationStatus, stderr: errorOutput))
+        }
+        return .success(output)
+    }
+
+    private static func readKeychainViaSecurityCLI(service: String, account: String?) -> [String: Any]? {
+        let accountArguments = account.map { ["-a", $0] } ?? []
+        guard case .success(let output) = runSecurityCLI(["find-generic-password", "-s", service] + accountArguments + ["-w"]) else {
             return nil
         }
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let jsonData = trimmed.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+        else { return nil }
+        return json
+    }
+
+    /// The account attribute of the item `security find-generic-password -s
+    /// <service>` resolves to — the same search the `-w` read performs, so the
+    /// answer describes the item whose secret was just read. Attributes are not
+    /// ACL-protected, so this never prompts. `.success(nil)` means the item has
+    /// no account attribute at all.
+    private static func storedKeychainAccount(service: String) -> Result<String?, SecurityCLIError> {
+        runSecurityCLI(["find-generic-password", "-s", service]).map(parsedAccount(fromSecurityAttributes:))
+    }
+
+    private static let accountAttributePrefix = "\"acct\"<blob>="
+
+    /// Extracts the account from `security find-generic-password` attribute
+    /// output. The line reads `"acct"<blob>="name"` for a set account and
+    /// `"acct"<blob>=<NULL>` for none.
+    static func parsedAccount(fromSecurityAttributes output: String) -> String? {
+        output.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { $0.hasPrefix(accountAttributePrefix) }
+            .flatMap { line -> String? in
+                let value = line.dropFirst(accountAttributePrefix.count)
+                guard value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") else { return nil }
+                return String(value.dropFirst().dropLast())
+            }
+    }
+
+    /// `security add-generic-password -U` on the (service, account) item. The
+    /// password travels on the command line, as it does for Claude Code's own
+    /// writes; `security` only reads it from a terminal otherwise.
+    private static func writeKeychainViaSecurityCLI(service: String, account: String?, password: String) -> Result<Void, SecurityCLIError> {
+        runSecurityCLI(["add-generic-password", "-a", account ?? "", "-s", service, "-U", "-w", password]).map { _ in () }
     }
 
     private static func hasFreshOAuthToken(_ json: [String: Any]) -> Bool {

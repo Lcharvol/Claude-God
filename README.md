@@ -164,6 +164,9 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.25.6
+- **Fixed**: Recurring "`security` wants to access key" password dialogs after every self-refresh — writing the rotated tokens back with `SecItemUpdate` re-stamped the Keychain item's partition list with the app's own cdhash, locking out the `/usr/bin/security` reads that follow (ours and Claude Code's), and blocked `security` processes piled up behind the dialog. Tokens are now written with `security add-generic-password -U` on the exact (service, account) the credentials were read from, so the item stays in the `apple-tool:` partition, and at most one `security` read is ever pending ([#48](https://github.com/Lcharvol/Claude-God/issues/48), thanks @RemiDev-cell)
+
 ### v2.25.5
 - **Fixed**: The Accounts section toggled a green dot and nothing else — every row resolved the same credentials, because `switchAccount()` always fell back to the default Keychain entry (or a prefix scan that picked whichever token was freshest), "Add" registered one hardcoded path for every row, and analytics were pinned to `~/.claude/projects`. A new `ActiveAccount` context derives the credentials file, Keychain service and `projects/` dir from the selected account's `CLAUDE_CONFIG_DIR`, and "Add" now asks for that directory ([#47](https://github.com/Lcharvol/Claude-God/pull/47), thanks @ValeriiMedvezhonkov)
 - **Fixed**: A switch that found no credentials kept the previous account signed in, so the new row showed the old account's quota. The switch now clears the token and the remembered Keychain coordinates first — a refresh could otherwise write one account's token into another's item — and says so when nothing resolves

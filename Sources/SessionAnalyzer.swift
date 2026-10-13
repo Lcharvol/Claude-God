@@ -31,6 +31,7 @@ enum UDKey {
     static let exportUsageJSON = "exportUsageJSON"
     static let statuslineInstalled = "statuslineInstalled"
     static let coloredMenuBar = "coloredMenuBar"
+    static let extraUsageHistory = "extraUsageHistory"
 }
 
 // MARK: - Logging

@@ -314,6 +314,7 @@ class UsageManager: ObservableObject {
 
     @Published var quotas: [UsageQuota] = []
     @Published var extraUsage: ExtraUsageData?
+    @Published var extraUsageHistory: ExtraUsageHistory = [:]
     @Published var isLoading = false
     private var loadingStartedAt: Date?
     private var currentFetchTask: URLSessionDataTask?
@@ -881,6 +882,15 @@ class UsageManager: ObservableObject {
             self.ringStatLabels = decoded
         } else {
             self.ringStatLabels = ["Session (5h)", "Opus (7d)", "Sonnet (7d)"]
+        }
+
+        // Load extra usage daily spend history
+        if let data = ud.data(forKey: UDKey.extraUsageHistory) {
+            do {
+                self.extraUsageHistory = try JSONDecoder().decode(ExtraUsageHistory.self, from: data)
+            } catch {
+                Log.error("Failed to decode extra usage history: \(error)")
+            }
         }
 
         // Load per-project budgets
@@ -1735,6 +1745,9 @@ class UsageManager: ObservableObject {
             )
         } + scopedWeeklyQuotas
         extraUsage = response.extraUsage
+        if let used = response.extraUsage?.usedCredits {
+            recordExtraUsageSnapshot(usedCents: used)
+        }
         Log.info("Parsed \(quotas.count) quotas, extraUsage=\(response.extraUsage != nil)")
         exportSnapshotIfEnabled()
     }
@@ -1762,6 +1775,27 @@ class UsageManager: ObservableObject {
         DispatchQueue.global(qos: .utility).async {
             UsageExporter.writeSnapshot(data)
         }
+    }
+
+    private func recordExtraUsageSnapshot(usedCents: Double) {
+        let updated = ExtraUsageBurndown.recordedHistory(extraUsageHistory, usedCents: usedCents, on: Date())
+        guard updated != extraUsageHistory else { return }
+        extraUsageHistory = updated
+        do {
+            UserDefaults.standard.set(try JSONEncoder().encode(updated), forKey: UDKey.extraUsageHistory)
+        } catch {
+            Log.error("Failed to encode extra usage history: \(error)")
+        }
+    }
+
+    /// Burndown for the current month, when extra usage has a monthly limit.
+    var extraUsageBurndown: ExtraUsageBurndown.Summary? {
+        guard let extra = extraUsage, extra.isEnabled,
+              let limit = extra.monthlyLimit else { return nil }
+        return ExtraUsageBurndown.summary(history: extraUsageHistory,
+                                          spentCents: extra.usedCredits ?? 0,
+                                          limitCents: limit,
+                                          now: Date())
     }
 
     // MARK: - Countdown

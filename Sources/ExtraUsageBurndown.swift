@@ -173,12 +173,17 @@ struct ExtraUsageBurndownChart: View {
         .chartXScale(domain: 0...summary.daysInMonth)
         .chartYScale(domain: 0...max(summary.limitCents, summary.spentCents) / 100)
         .chartXAxis {
-            AxisMarks(values: [1, summary.daysInMonth / 2, summary.daysInMonth]) { _ in
-                AxisValueLabel().font(.system(size: 9))
+            AxisMarks(values: [1, summary.daysInMonth / 2, summary.daysInMonth]) { value in
+                // The last day's tick sits on the plot's right edge; a centered label
+                // there overflows and Charts drops it. Right-align it so it ends flush
+                // with the card's right-aligned values below.
+                let isLastDay = value.as(Int.self) == summary.daysInMonth
+                AxisValueLabel(anchor: isLastDay ? .topTrailing : .top)
+                    .font(.system(size: 9))
             }
         }
         .chartYAxis {
-            AxisMarks(position: .trailing, values: .automatic(desiredCount: 2)) { value in
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 2)) { value in
                 AxisGridLine().foregroundStyle(Color.primary.opacity(0.06))
                 AxisValueLabel {
                     if let dollars = value.as(Double.self) {

@@ -164,6 +164,9 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.26.0
+- **Changed**: New app icon — a spiral of concentric rings replaces the "C", echoing the menu bar usage rings; the landing page favicons and header logo use the same artwork ([#51](https://github.com/Lcharvol/Claude-God/pull/51))
+
 ### v2.25.6
 - **Fixed**: Recurring "`security` wants to access key" password dialogs after every self-refresh — writing the rotated tokens back with `SecItemUpdate` re-stamped the Keychain item's partition list with the app's own cdhash, locking out the `/usr/bin/security` reads that follow (ours and Claude Code's), and blocked `security` processes piled up behind the dialog. Tokens are now written with `security add-generic-password -U` on the exact (service, account) the credentials were read from, so the item stays in the `apple-tool:` partition, and at most one `security` read is ever pending ([#48](https://github.com/Lcharvol/Claude-God/issues/48), thanks @RemiDev-cell)
 

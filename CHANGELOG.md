@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.26.0] - 2026-10-15
+
+### Changed
+- **New app icon** — the plain white "C" on a purple gradient is replaced by a spiral of concentric rings, echoing the usage rings the app draws in the menu bar. The icon follows the macOS grid (white rounded body with a margin and soft shadow), and the landing page favicons and header logo use the same artwork ([#51](https://github.com/Lcharvol/Claude-God/pull/51))
+
 ## [2.25.6] - 2026-09-21
 
 ### Fixed

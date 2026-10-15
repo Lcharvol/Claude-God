@@ -1050,6 +1050,10 @@ struct MenuBarView: View {
                         .accessibilityHidden(true)
                     }
 
+                    if let burndown = manager.extraUsageBurndown {
+                        ExtraUsageBurndownChart(summary: burndown)
+                    }
+
                     HStack {
                         Text("Spent this month")
                             .shFont(11)

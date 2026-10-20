@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.27.0] - 2026-10-20
+
+### Added
+- **Burndown chart on the Extra Usage card** — when extra usage is enabled with a monthly limit, the card now plots month-to-date spend against an even pace toward the limit (dashed line from $0 on day 0 to the limit on the last day), green while under pace and red once over, with a marker for today. A "Pace today" row shows how far under or over the even-pace target you are, and its tooltip gives the target amount. The usage API only reports month-to-date spend, so the app keeps one snapshot per calendar day (about 62 days) and fills in the curve as it observes refreshes; days it didn't run are interpolated. The pace assumes the limit resets on the 1st of each calendar month. A value recorded above the live spend — last month's total caught on the 1st before the API reset — is ignored rather than drawn as a spike, and the chart text follows the popover's text-size setting ([#50](https://github.com/Lcharvol/Claude-God/pull/50), thanks @ecoffey)
+
 ## [2.26.0] - 2026-10-15
 
 ### Changed

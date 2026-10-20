@@ -164,6 +164,9 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.27.0
+- **Added**: Burndown chart on the Extra Usage card — month-to-date spend against an even pace toward the monthly limit, green under pace and red over, with a "Pace today" delta. History is built from one local snapshot per day ([#50](https://github.com/Lcharvol/Claude-God/pull/50), thanks @ecoffey)
+
 ### v2.26.0
 - **Changed**: New app icon — a spiral of concentric rings replaces the "C", echoing the menu bar usage rings; the landing page favicons and header logo use the same artwork ([#51](https://github.com/Lcharvol/Claude-God/pull/51))
 

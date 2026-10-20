@@ -314,7 +314,10 @@ class UsageManager: ObservableObject {
 
     @Published var quotas: [UsageQuota] = []
     @Published var extraUsage: ExtraUsageData?
-    @Published var extraUsageHistory: ExtraUsageHistory = [:]
+    /// Burndown for the current month, cached here so SwiftUI renders don't
+    /// recompute it; refreshed whenever extra usage is applied.
+    @Published private(set) var extraUsageBurndown: ExtraUsageBurndown.Summary?
+    private var extraUsageHistory: ExtraUsageHistory = [:]
     @Published var isLoading = false
     private var loadingStartedAt: Date?
     private var currentFetchTask: URLSessionDataTask?
@@ -1748,6 +1751,9 @@ class UsageManager: ObservableObject {
         if let used = response.extraUsage?.usedCredits {
             recordExtraUsageSnapshot(usedCents: used)
         }
+        extraUsageBurndown = ExtraUsageBurndown.summary(for: response.extraUsage,
+                                                         history: extraUsageHistory,
+                                                         now: Date())
         Log.info("Parsed \(quotas.count) quotas, extraUsage=\(response.extraUsage != nil)")
         exportSnapshotIfEnabled()
     }
@@ -1786,16 +1792,6 @@ class UsageManager: ObservableObject {
         } catch {
             Log.error("Failed to encode extra usage history: \(error)")
         }
-    }
-
-    /// Burndown for the current month, when extra usage has a monthly limit.
-    var extraUsageBurndown: ExtraUsageBurndown.Summary? {
-        guard let extra = extraUsage, extra.isEnabled,
-              let limit = extra.monthlyLimit else { return nil }
-        return ExtraUsageBurndown.summary(history: extraUsageHistory,
-                                          spentCents: extra.usedCredits ?? 0,
-                                          limitCents: limit,
-                                          now: Date())
     }
 
     // MARK: - Countdown

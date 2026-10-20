@@ -17,9 +17,18 @@ enum ExtraUsageBurndown {
     /// Days of history kept; covers the current and previous month.
     static let retentionDays = 62
 
+    /// Calendar for day keys and month boundaries. Gregorian regardless of the
+    /// user's calendar so keys, days of month and billing months always agree.
+    static let calendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = .current
+        return c
+    }()
+
     private static let dayKeyFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
+        f.calendar = calendar
+        f.timeZone = calendar.timeZone
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
         return f
@@ -37,7 +46,7 @@ enum ExtraUsageBurndown {
     static func recordedHistory(_ history: ExtraUsageHistory,
                                 usedCents: Double,
                                 on now: Date,
-                                calendar: Calendar = .current) -> ExtraUsageHistory {
+                                calendar: Calendar = ExtraUsageBurndown.calendar) -> ExtraUsageHistory {
         let cutoff = calendar.date(byAdding: .day, value: -retentionDays, to: now) ?? now
         let cutoffKey = dayKey(for: cutoff)
         return history
@@ -70,21 +79,36 @@ enum ExtraUsageBurndown {
         }
     }
 
+    /// Burndown for the current month, when extra usage is enabled with a monthly limit.
+    static func summary(for extra: ExtraUsageData?,
+                        history: ExtraUsageHistory,
+                        now: Date) -> Summary? {
+        guard let extra, extra.isEnabled, let limit = extra.monthlyLimit else { return nil }
+        return summary(history: history,
+                       spentCents: extra.usedCredits ?? 0,
+                       limitCents: limit,
+                       now: now)
+    }
+
     /// Burndown for the calendar month containing `now`.
     static func summary(history: ExtraUsageHistory,
                         spentCents: Double,
                         limitCents: Double,
                         now: Date,
-                        calendar: Calendar = .current) -> Summary? {
+                        calendar: Calendar = ExtraUsageBurndown.calendar) -> Summary? {
         guard limitCents > 0,
               let monthInterval = calendar.dateInterval(of: .month, for: now),
               let daysInMonth = calendar.range(of: .day, in: .month, for: now)?.count else { return nil }
 
         let today = calendar.component(.day, from: now)
+        // Month-to-date spend never decreases, so a recorded value above the live one
+        // is stale: typically last month's total captured on the 1st before the API
+        // reset `used_credits`. Dropping it avoids a spike on the chart.
         let recorded = history.compactMap { key, cents -> Point? in
             guard let date = date(fromDayKey: key), monthInterval.contains(date) else { return nil }
             return Point(day: calendar.component(.day, from: date), cents: cents)
         }
+        .filter { $0.cents <= spentCents }
         // Live value always wins for today; spend starts at zero before day 1.
         let actual = ([Point(day: 0, cents: 0)]
             + recorded.filter { $0.day != today }
@@ -107,9 +131,17 @@ enum ExtraUsageBurndown {
 struct ExtraUsageBurndownChart: View {
     let summary: ExtraUsageBurndown.Summary
 
-    private static let chartHeight: CGFloat = 70
+    @Environment(\.textScale) private var textScale
 
-    private var paceColor: Color { summary.isOverPace ? .red : .green }
+    private static let chartHeight: CGFloat = 70
+    private static let axisFontSize: CGFloat = 9
+
+    private var paceColor: Color {
+        (summary.isOverPace ? UsageLevel.critical : UsageLevel.good).color
+    }
+
+    /// Axis labels can't take `shFont` (they aren't plain views), so scale by hand.
+    private var axisFont: Font { .system(size: Self.axisFontSize * textScale) }
 
     private static func dollars(_ cents: Double) -> String {
         String(format: "$%.2f", cents / 100.0)
@@ -128,16 +160,17 @@ struct ExtraUsageBurndownChart: View {
 
             HStack {
                 Text("Pace today")
-                    .font(.system(size: 11))
+                    .shFont(11)
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(paceText)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .shFont(11, weight: .semibold, design: .monospaced)
                     .foregroundColor(paceColor)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Pace today, \(paceText) budget. Target so far \(Self.dollars(summary.idealTodayCents))")
-            .help("Even-pace target through today: \(Self.dollars(summary.idealTodayCents))")
+            .help("Even-pace target through today: \(Self.dollars(summary.idealTodayCents)). "
+                  + "Assumes the limit resets on the 1st of each calendar month.")
         }
     }
 
@@ -179,7 +212,7 @@ struct ExtraUsageBurndownChart: View {
                 // with the card's right-aligned values below.
                 let isLastDay = value.as(Int.self) == summary.daysInMonth
                 AxisValueLabel(anchor: isLastDay ? .topTrailing : .top)
-                    .font(.system(size: 9))
+                    .font(axisFont)
             }
         }
         .chartYAxis {
@@ -187,7 +220,7 @@ struct ExtraUsageBurndownChart: View {
                 AxisGridLine().foregroundStyle(Color.primary.opacity(0.06))
                 AxisValueLabel {
                     if let dollars = value.as(Double.self) {
-                        Text(String(format: "$%.0f", dollars)).font(.system(size: 9))
+                        Text(String(format: "$%.0f", dollars)).font(axisFont)
                     }
                 }
             }

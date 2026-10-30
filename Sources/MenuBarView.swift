@@ -97,19 +97,26 @@ struct MenuBarView: View {
                         extensionsView
                     } else if manager.isLoading && manager.lastRefresh == nil {
                         loadingView
+                    // hasUsageData intentionally checks `extraUsage != nil` and not
+                    // `extraUsageQuota != nil`: the latter also requires isEnabled + a
+                    // non-nil utilization, but the Extra Usage card still has something
+                    // useful to show (an On/Off badge, spend to date) when those are
+                    // absent. Narrowing this would send extra-usage-only accounts back
+                    // to the empty state.
+                    } else if manager.hasUsageData {
+                        // Errors sit above existing data rather than replacing it.
+                        VStack(spacing: 12) {
+                            if let error = manager.errorMessage {
+                                errorView(error)
+                            }
+                            if manager.compactMode {
+                                compactUsageView
+                            } else {
+                                usageView
+                            }
+                        }
                     } else if let error = manager.errorMessage {
                         errorView(error)
-                    // Intentionally `extraUsage != nil` and not `extraUsageQuota != nil`:
-                    // the latter also requires isEnabled + a non-nil utilization, but the
-                    // Extra Usage card still has something useful to show (an On/Off badge,
-                    // spend to date) when those are absent. Narrowing this would send
-                    // extra-usage-only accounts back to the empty state.
-                    } else if !manager.quotas.isEmpty || manager.extraUsage != nil {
-                        if manager.compactMode {
-                            compactUsageView
-                        } else {
-                            usageView
-                        }
                     } else {
                         emptyView
                     }

@@ -768,22 +768,8 @@ class UsageManager: ObservableObject {
     // MARK: - Monthly cost forecast
 
     var monthlyForecast: (projected: Double, daysRemaining: Int)? {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: today)),
-              let daysInMonth = cal.range(of: .day, in: .month, for: today)?.count
-        else { return nil }
-        let dayOfMonth = cal.component(.day, from: today)
-        guard dayOfMonth >= 3 else { return nil } // Need at least 3 days of data
-
-        let costSoFar = monthStats.daily
-            .filter { cal.startOfDay(for: $0.date) >= monthStart }
-            .reduce(0.0) { $0 + $1.cost }
-        guard costSoFar > 0 else { return nil }
-
-        let dailyRate = costSoFar / Double(dayOfMonth)
-        let projected = dailyRate * Double(daysInMonth)
-        return (projected: projected, daysRemaining: daysInMonth - dayOfMonth)
+        CostForecast.projection(daily: monthStats.daily, now: Date())
+            .map { (projected: $0.projected, daysRemaining: $0.daysRemaining) }
     }
 
     // MARK: - Model advisor

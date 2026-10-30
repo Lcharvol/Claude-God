@@ -80,10 +80,20 @@ enum ModelPricing {
 private struct JSONLEntry: Decodable {
     let type: String?
     let timestamp: String?
+    let requestId: String?
     let message: JSONLMessage?
+
+    /// Identity of the API response this line belongs to. Claude Code writes one
+    /// line per content block, each repeating the response's full `usage`, so
+    /// lines sharing this key must be counted once. Nil when the log predates IDs.
+    var responseKey: String? {
+        guard message?.id != nil || requestId != nil else { return nil }
+        return "\(message?.id ?? ""):\(requestId ?? "")"
+    }
 }
 
 private struct JSONLMessage: Decodable {
+    let id: String?
     let role: String?
     let model: String?
     let usage: JSONLUsage?
@@ -416,6 +426,13 @@ class SessionAnalyzer {
     /// Max JSONL file size to load into memory (300 MB)
     private static let maxFileSize: UInt64 = 300 * 1024 * 1024
 
+    /// True the first time a response key is seen, recording it in `seen`.
+    /// Lines without a key are always counted, as there is nothing to match on.
+    private static func isFirstOccurrence(_ entry: JSONLEntry, in seen: inout Set<String>) -> Bool {
+        guard let key = entry.responseKey else { return true }
+        return seen.insert(key).inserted
+    }
+
     /// Iterate JSONL lines from raw Data — avoids Data→String→Data roundtrip
     private static let newline = UInt8(ascii: "\n")
     static func enumerateJSONLines(in data: Data, body: (Data) -> Void) {
@@ -494,6 +511,8 @@ class SessionAnalyzer {
         var projectAgg: [String: (name: String, cost: Double, messages: Int, sessions: Int)] = [:]
         var totalMessages = 0
         var sessionFiles = Set<String>()
+        // Shared across files: resumed sessions copy earlier responses into the new file.
+        var seenResponses = Set<String>()
 
         // For recent sessions: collect all files with modDates, sorted later
         var allFileInfos: [(url: URL, modDate: Date, projectName: String)] = []
@@ -543,7 +562,9 @@ class SessionAnalyzer {
                           let timestamp = parseISO(timestampStr)
                     else { return }
 
-                    guard timestamp >= since, timestamp <= until else { return }
+                    guard timestamp >= since, timestamp <= until,
+                          isFirstOccurrence(entry, in: &seenResponses)
+                    else { return }
 
                     let inputTokens = usage.inputTokens ?? 0
                     let outputTokens = usage.outputTokens ?? 0
@@ -635,6 +656,7 @@ class SessionAnalyzer {
             var cost: Double = 0
             var messageCount = 0
             var modelCounts: [String: Int] = [:]
+            var seenResponses = Set<String>()
 
             enumerateJSONLines(in: data) { lineData in
                 guard let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData)
@@ -651,7 +673,8 @@ class SessionAnalyzer {
                 if entry.type == "assistant",
                    let message = entry.message,
                    let usage = message.usage,
-                   let model = message.model, model != "<synthetic>" {
+                   let model = message.model, model != "<synthetic>",
+                   isFirstOccurrence(entry, in: &seenResponses) {
                     if let ts = entry.timestamp, let date = parseISO(ts) {
                         if firstTimestamp == nil { firstTimestamp = date }
                         lastTimestamp = date
@@ -735,6 +758,7 @@ class SessionAnalyzer {
             var cost: Double = 0
             var messageCount = 0
             var modelCounts: [String: Int] = [:]
+            var seenResponses = Set<String>()
 
             enumerateJSONLines(in: data) { lineData in
                 // Single decode per line — handles both user and assistant
@@ -753,7 +777,8 @@ class SessionAnalyzer {
                 if entry.type == "assistant",
                    let message = entry.message,
                    let usage = message.usage,
-                   let model = message.model, model != "<synthetic>" {
+                   let model = message.model, model != "<synthetic>",
+                   isFirstOccurrence(entry, in: &seenResponses) {
 
                     if let ts = entry.timestamp, let date = parseISO(ts) {
                         if firstTimestamp == nil { firstTimestamp = date }
@@ -808,13 +833,15 @@ class SessionAnalyzer {
 
         var cost: Double = 0
         var messageCount = 0
+        var seenResponses = Set<String>()
 
         enumerateJSONLines(in: data) { lineData in
             guard let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData),
                   entry.type == "assistant",
                   let message = entry.message,
                   let usage = message.usage,
-                  let model = message.model, model != "<synthetic>"
+                  let model = message.model, model != "<synthetic>",
+                  isFirstOccurrence(entry, in: &seenResponses)
             else { return }
 
             let price = ModelPricing.price(for: model)
@@ -917,6 +944,7 @@ extension SessionAnalyzer {
                 var lastUserText = ""
                 var sessionTopic = ""
                 var modelCounts: [String: Int] = [:]
+                var seenResponses = Set<String>()
                 var sessionHasMatchingDay = false
 
                 enumerateJSONLines(in: data) { lineData in
@@ -945,7 +973,9 @@ extension SessionAnalyzer {
                     else { return }
 
                     // Check if this message falls within the target day
-                    guard timestamp >= dayStart, timestamp < dayEnd else { return }
+                    guard timestamp >= dayStart, timestamp < dayEnd,
+                          isFirstOccurrence(entry, in: &seenResponses)
+                    else { return }
                     sessionHasMatchingDay = true
 
                     let input = usage.inputTokens ?? 0
@@ -1039,6 +1069,7 @@ extension SessionAnalyzer {
                 var lastUserText = ""
                 var sessionTopic = ""
                 var modelCounts: [String: Int] = [:]
+                var seenResponses = Set<String>()
 
                 enumerateJSONLines(in: data) { lineData in
                     guard let entry = try? jsonDecoder.decode(JSONLEntry.self, from: lineData) else { return }
@@ -1063,7 +1094,9 @@ extension SessionAnalyzer {
                           (usage.outputTokens ?? 0) > 0
                     else { return }
 
-                    guard timestamp >= startDate, timestamp <= endDate else { return }
+                    guard timestamp >= startDate, timestamp <= endDate,
+                          isFirstOccurrence(entry, in: &seenResponses)
+                    else { return }
 
                     let input = usage.inputTokens ?? 0
                     let output = usage.outputTokens ?? 0

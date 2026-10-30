@@ -326,6 +326,10 @@ class UsageManager: ObservableObject {
     @Published var lastRefresh: Date?
     @Published var timeUntilReset: String = "—"
 
+    /// True when the usage view has something to show. Extra-usage-only accounts
+    /// count: they have no quotas but still render the Extra Usage card.
+    var hasUsageData: Bool { !quotas.isEmpty || extraUsage != nil }
+
     // MARK: - Live session cost
 
     @Published var activeSessionCost: Double = 0
@@ -1423,33 +1427,30 @@ class UsageManager: ObservableObject {
 
     // MARK: - Actions
 
-    /// Manual refresh — always clears rate limit cooldown
+    /// Manual refresh — skips the rate limit cooldown. The 429 count is kept so
+    /// backoff keeps growing if the server is still limiting; only a 200 resets it.
     func refresh() {
         rateLimitedUntil = nil
-        consecutive429Count = 0
         refreshInternal()
     }
 
-    /// Refresh if data is older than 2 minutes (called on popover appear)
+    /// Refresh if data is older than 2 minutes (called on popover appear).
+    /// Goes through the cooldown: while rate limited lastRefresh never advances,
+    /// so every popover open would otherwise fire another request.
     func refreshIfStale() {
         let staleThreshold: TimeInterval = 120
         if let last = lastRefresh, Date().timeIntervalSince(last) < staleThreshold { return }
         Log.info("Data stale (>2min) — auto-refreshing on popover open")
-        refresh()
+        autoRefresh()
     }
 
     /// Auto-refresh — respects rate limit cooldown
     func autoRefresh() {
         if let until = rateLimitedUntil, Date() < until {
-            let remaining = Int(until.timeIntervalSince(Date()))
-            if remaining > 0 {
-                Log.info("Auto-refresh skipped, rate limited for \(remaining)s more")
-                return
-            }
-            rateLimitedUntil = nil
-            consecutive429Count = 0
-            Log.info("Rate limit cooldown expired, resetting backoff")
+            Log.info("Auto-refresh skipped, rate limited for \(Int(until.timeIntervalSinceNow))s more")
+            return
         }
+        rateLimitedUntil = nil
         refreshInternal()
     }
 
@@ -1647,7 +1648,7 @@ class UsageManager: ObservableObject {
                         cooldown = steps[index]
                     }
                     self.rateLimitedUntil = Date().addingTimeInterval(cooldown)
-                    if !self.quotas.isEmpty {
+                    if self.hasUsageData {
                         self.finishLoading()
                         Log.info("Rate limited (429), keeping existing data, retry in \(Int(cooldown))s")
                     } else {

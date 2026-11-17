@@ -164,6 +164,13 @@ git tag v2.8.0 && git push origin v2.8.0
 
 ## Changelog
 
+### v2.27.1
+- **Fixed**: OAuth tokens were stored in plaintext in the app's on-disk URL cache, and refreshed credentials were visible in `ps`. Requests now skip the URL cache, leftover cache files are purged at launch, and Keychain writes go through stdin ([#57](https://github.com/Lcharvol/Claude-God/pull/57), fixes [#55](https://github.com/Lcharvol/Claude-God/issues/55))
+- **Fixed**: Local costs were roughly doubled, because Claude Code repeats a response's `usage` on every content-block line. Each response is now counted once, so costs after upgrading are about half of what earlier versions showed ([#53](https://github.com/Lcharvol/Claude-God/pull/53), thanks @ecoffey)
+- **Fixed**: The monthly forecast now adds the trailing 7-day pace over the remaining time to actual month-to-date spend, instead of extrapolating the month-to-date average ([#53](https://github.com/Lcharvol/Claude-God/pull/53))
+- **Fixed**: While rate limited, existing data stays visible (including Extra Usage–only accounts) and the retry backoff actually grows ([#53](https://github.com/Lcharvol/Claude-God/pull/53))
+- **Fixed**: The ROI tab showed "No data yet" for repos outside a `Projects` folder; sessions and commits are now matched by git root ([#56](https://github.com/Lcharvol/Claude-God/pull/56), fixes [#54](https://github.com/Lcharvol/Claude-God/issues/54))
+
 ### v2.27.0
 - **Added**: Burndown chart on the Extra Usage card — month-to-date spend against an even pace toward the monthly limit, green under pace and red over, with a "Pace today" delta. History is built from one local snapshot per day ([#50](https://github.com/Lcharvol/Claude-God/pull/50), thanks @ecoffey)
 

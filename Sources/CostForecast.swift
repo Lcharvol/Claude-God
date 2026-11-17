@@ -12,6 +12,11 @@ enum CostForecast {
     /// weekday/weekend swings averaged out.
     static let paceWindowDays = 7
 
+    /// Floor on the pace window. With only a few hours of history (new install,
+    /// first use in the stats window) a fractional window would extrapolate a
+    /// morning's spend into an absurd daily pace.
+    static let minimumPaceWindowDays: Double = 1
+
     struct Projection: Equatable {
         let projected: Double
         let daysRemaining: Int
@@ -35,8 +40,7 @@ enum CostForecast {
         // shrinks the window rather than diluting the pace with days that have no data.
         let earliestDay = daily.map { calendar.startOfDay(for: $0.date) }.min() ?? today
         let windowStart = max(paceStart, earliestDay)
-        let windowDays = days(from: windowStart, to: now)
-        guard windowDays > 0 else { return nil }
+        let windowDays = max(days(from: windowStart, to: now), minimumPaceWindowDays)
         let dailyPace = cost(of: daily, since: windowStart, calendar: calendar) / windowDays
 
         let remainingDays = days(from: now, to: month.end)

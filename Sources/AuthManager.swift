@@ -301,7 +301,7 @@ class AuthManager: ObservableObject {
         request.httpBody = "grant_type=refresh_token&refresh_token=\(encodedToken)&client_id=\(Self.oauthClientID)"
             .data(using: .utf8)
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+        NetworkSession.uncached.dataTask(with: request) { [weak self] data, _, error in
             guard let self else { finish(false); return }
 
             if let error {
@@ -544,22 +544,31 @@ class AuthManager: ObservableObject {
         return loadBestKeychainEntry(matching: service, exact: ActiveAccount.isPinned)
     }
 
-    /// Runs `/usr/bin/security` with `arguments` and returns its stdout.
-    private static func runSecurityCLI(_ arguments: [String]) -> Result<String, SecurityCLIError> {
+    /// Runs `/usr/bin/security` with `arguments`, feeding it `input` on stdin,
+    /// and returns its stdout.
+    private static func runSecurityCLI(_ arguments: [String], input: String? = nil) -> Result<String, SecurityCLIError> {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: securityCLIPath)
         process.arguments = arguments
 
         let stdout = Pipe()
         let stderr = Pipe()
+        let stdin = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
+        process.standardInput = stdin
 
         do {
             try process.run()
         } catch {
             return .failure(.launchFailed(error.localizedDescription))
         }
+        // Input is one command line (≤ 4 KB), well under the pipe buffer, so
+        // writing it all before draining stdout cannot block.
+        if let inputData = input?.data(using: .utf8) {
+            stdin.fileHandleForWriting.write(inputData)
+        }
+        stdin.fileHandleForWriting.closeFile()
         // Drain before waiting: a pipe that fills up would deadlock the child.
         let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
@@ -609,11 +618,44 @@ class AuthManager: ObservableObject {
             }
     }
 
-    /// `security add-generic-password -U` on the (service, account) item. The
-    /// password travels on the command line, as it does for Claude Code's own
-    /// writes; `security` only reads it from a terminal otherwise.
+    /// `security add-generic-password -U` on the (service, account) item.
+    ///
+    /// The command goes to `security -i` on stdin rather than in argv, because
+    /// the password is the whole credential JSON (access *and* refresh token)
+    /// and argv is readable by every local process through `ps` (issue #55).
+    /// `security` only reads a bare `-w` from a terminal, so interactive mode is
+    /// the way to keep it on a pipe — still the same binary, so the item stays
+    /// in its `apple-tool:` partition (issue #48).
+    ///
+    /// Interactive mode reads each command into a fixed buffer; a credential too
+    /// large for it (or one containing a newline, which would split the command)
+    /// falls back to argv rather than leaving Claude Code with a spent token.
     private static func writeKeychainViaSecurityCLI(service: String, account: String?, password: String) -> Result<Void, SecurityCLIError> {
-        runSecurityCLI(["add-generic-password", "-a", account ?? "", "-s", service, "-U", "-w", password]).map { _ in () }
+        let arguments = ["add-generic-password", "-a", account ?? "", "-s", service, "-U", "-w", password]
+        guard let commandLine = interactiveSecurityCommandLine(arguments) else {
+            Log.warn("writeKeychainViaSecurityCLI: credential too large for `security -i`, passing it on the command line")
+            return runSecurityCLI(arguments).map { _ in () }
+        }
+        return runSecurityCLI(["-i"], input: commandLine + "\n").map { _ in () }
+    }
+
+    /// Longest command line `security -i` accepts, in bytes (measured: its line
+    /// buffer is 4096 bytes including the terminator).
+    static let maxInteractiveSecurityLineBytes = 4095
+
+    /// `arguments` as one `security -i` command line: every token double-quoted,
+    /// with `\` and `"` backslash-escaped. `nil` when it cannot be sent that way.
+    static func interactiveSecurityCommandLine(_ arguments: [String]) -> String? {
+        guard !arguments.contains(where: { $0.contains(where: \.isNewline) }) else { return nil }
+        let line = arguments.map(quotedForInteractiveSecurity).joined(separator: " ")
+        return line.utf8.count <= maxInteractiveSecurityLineBytes ? line : nil
+    }
+
+    private static func quotedForInteractiveSecurity(_ argument: String) -> String {
+        let escaped = argument
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
 
     private static func hasFreshOAuthToken(_ json: [String: Any]) -> Bool {

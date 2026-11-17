@@ -1544,7 +1544,7 @@ class UsageManager: ObservableObject {
 
         Log.info("Fetching usage from OAuth API... (attempt \(retryCount + 1), id: \(activeFetchID.uuidString.prefix(8)))")
 
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        let task = NetworkSession.uncached.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 // Ignore response if a newer fetch has been started

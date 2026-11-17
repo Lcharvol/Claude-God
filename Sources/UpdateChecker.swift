@@ -20,7 +20,7 @@ class UpdateChecker: ObservableObject {
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+        NetworkSession.uncached.dataTask(with: request) { [weak self] data, _, error in
             guard let data = data, error == nil else { return }
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let tagName = json["tag_name"] as? String,

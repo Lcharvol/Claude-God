@@ -8,6 +8,7 @@ struct ClaudeGodApp: App {
     @StateObject private var manager: UsageManager
 
     init() {
+        DispatchQueue.global(qos: .utility).async { NetworkSession.purgeLegacyDiskCache() }
         let mgr = UsageManager()
         UsageManager.shared = mgr
         _manager = StateObject(wrappedValue: mgr)

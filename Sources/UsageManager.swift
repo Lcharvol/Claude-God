@@ -1135,7 +1135,10 @@ class UsageManager: ObservableObject {
         let days = 30
         let cal = Calendar.current
 
-        let allCommits = GitAnalyzer.allCommits(sinceDaysAgo: days)
+        // Match commits to sessions by real git root, not by a name derived from the
+        // encoded directory: that name never matches repos outside a "Projects" folder.
+        let gitRoots = GitAnalyzer.gitRootsByDirectory()
+        let allCommits = GitAnalyzer.commits(inRoots: Set(gitRoots.values), sinceDaysAgo: days)
         guard !allCommits.isEmpty else { return .empty }
 
         // Single-pass: get all sessions for the last 30 days at once
@@ -1158,13 +1161,12 @@ class UsageManager: ObservableObject {
             // Check sessions in a window around the insertion point
             let searchStart = max(0, lo - sortedSessions.count) // check all before (could have long windows)
             let searchEnd = min(sortedSessions.count, lo + 1)
-            let commitPathLower = commit.projectPath.lowercased()
             for i in (0..<searchEnd).reversed() {
                 let session = sortedSessions[i]
                 // Early exit: if session ended+window is before commit, no earlier session can match either
                 let windowEnd = session.endTime.addingTimeInterval(assistedWindowSeconds)
                 if windowEnd < commit.date { break }
-                if commit.date >= session.startTime && commitPathLower.contains(session.projectName.lowercased()) {
+                if commit.date >= session.startTime && gitRoots[session.directoryName] == commit.projectPath {
                     return true
                 }
             }
@@ -1178,11 +1180,14 @@ class UsageManager: ObservableObject {
 
         // By project
         let commitsByProject = Dictionary(grouping: assistedCommits, by: { $0.projectPath })
-        let sessionsByProject = Dictionary(grouping: allSessions, by: { $0.projectName.lowercased() })
+        let sessionsByRoot = Dictionary(
+            grouping: allSessions.filter { gitRoots[$0.directoryName] != nil },
+            by: { gitRoots[$0.directoryName] ?? "" }
+        )
 
         let byProject: [ProjectROI] = commitsByProject.map { (path, commits) in
             let projectName = path.split(separator: "/").last.map(String.init) ?? path
-            let projectSessions = sessionsByProject.first { path.lowercased().contains($0.key) }?.value ?? []
+            let projectSessions = sessionsByRoot[path] ?? []
             let projCost = projectSessions.reduce(0.0) { $0 + $1.cost }
             let projLines = commits.reduce(0) { $0 + $1.totalLinesChanged }
 

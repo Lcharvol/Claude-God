@@ -223,30 +223,36 @@ enum GitAnalyzer {
         return commits
     }
 
-    /// Fetch commits from all known Claude project directories
-    static func allCommits(sinceDaysAgo days: Int = 30) -> [GitCommit] {
+    /// Map each Claude projects directory name to the git root of the path it encodes.
+    /// Directories that don't decode to an existing path or aren't in a git repo are omitted.
+    static func gitRootsByDirectory() -> [String: String] {
         let fm = FileManager.default
         guard let projectDirs = try? fm.contentsOfDirectory(
             at: SessionAnalyzer.projectsDir,
             includingPropertiesForKeys: nil
-        ) else { return [] }
-
-        var seenRoots = Set<String>()
-        var allCommits: [GitCommit] = []
-
-        for projectDir in projectDirs {
-            let dirName = projectDir.lastPathComponent
-            guard let path = actualPath(from: dirName) else { continue }
-
-            guard fm.fileExists(atPath: path),
-                  let root = gitRoot(for: path),
-                  !seenRoots.contains(root)
-            else { continue }
-
-            seenRoots.insert(root)
-            allCommits.append(contentsOf: commits(in: root, sinceDaysAgo: days))
+        ) else {
+            print("[ClaudeGod] Could not list \(SessionAnalyzer.projectsDir.path) for git roots")
+            return [:]
         }
 
-        return allCommits
+        let pairs = projectDirs.compactMap { projectDir -> (String, String)? in
+            let dirName = projectDir.lastPathComponent
+            guard let path = actualPath(from: dirName),
+                  fm.fileExists(atPath: path),
+                  let root = gitRoot(for: path)
+            else { return nil }
+            return (dirName, root)
+        }
+        return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Fetch commits from each distinct git root
+    static func commits(inRoots roots: Set<String>, sinceDaysAgo days: Int = 30) -> [GitCommit] {
+        roots.flatMap { commits(in: $0, sinceDaysAgo: days) }
+    }
+
+    /// Fetch commits from all known Claude project directories
+    static func allCommits(sinceDaysAgo days: Int = 30) -> [GitCommit] {
+        commits(inRoots: Set(gitRootsByDirectory().values), sinceDaysAgo: days)
     }
 }

@@ -464,12 +464,8 @@ class SessionAnalyzer {
         if let range = name.range(of: "-projects-", options: [.backwards, .caseInsensitive]) {
             return String(name[range.upperBound...])
         }
-        // Fallback: last segment
-        let parts = name.split(separator: "-")
-        if parts.count >= 2 {
-            return parts.suffix(2).joined(separator: "-")
-        }
-        return name
+        // Fallback: last segment (e.g. "-Users-me-Development-app" -> "app")
+        return name.split(separator: "-").last.map(String.init) ?? name
     }
 
     /// Result of analyzeWithSessions — stats + recent sessions in a single pass
@@ -850,6 +846,7 @@ struct TimelineMessage: Identifiable {
 struct TimelineSession: Identifiable {
     let id: String
     let projectName: String
+    let directoryName: String // encoded Claude projects dir, e.g. "-Users-me-Development-app"
     let topic: String
     let startTime: Date
     let endTime: Date
@@ -988,6 +985,7 @@ extension SessionAnalyzer {
                 sessions.append(TimelineSession(
                     id: stableID,
                     projectName: projName,
+                    directoryName: dirName,
                     topic: cleanTopic.isEmpty ? "Untitled session" : cleanTopic,
                     startTime: sortedMsgs.first?.timestamp ?? Date(),
                     endTime: sortedMsgs.last?.timestamp ?? Date(),
@@ -1102,6 +1100,7 @@ extension SessionAnalyzer {
                 sessions.append(TimelineSession(
                     id: stableID,
                     projectName: projName,
+                    directoryName: dirName,
                     topic: cleanTopic.isEmpty ? "Untitled session" : cleanTopic,
                     startTime: sortedMsgs.first?.timestamp ?? Date(),
                     endTime: sortedMsgs.last?.timestamp ?? Date(),
